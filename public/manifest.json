@@ -1,0 +1,16 @@
+{
+  "short_name": "Aura",
+  "name": "Aura — Voice-First AI Chief of Staff",
+  "icons": [
+    {
+      "src": "/aura-icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#08090d",
+  "theme_color": "#08090d",
+  "display": "standalone",
+  "orientation": "portrait"
+}

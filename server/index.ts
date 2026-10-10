@@ -1,0 +1,414 @@
+import 'dotenv/config';
+import express, { Request, Response } from 'express';
+import https from 'https';
+import http from 'http';
+import path from 'path';
+import cors from 'cors';
+import { WebSocketServer, WebSocket } from 'ws';
+import { db } from './storage/db.js';
+import { googleAuth } from './services/googleAuthService.js';
+import { geminiLive } from './services/geminiLiveService.js';
+import { orchestrator } from './services/agentOrchestrator.js';
+import { pluginRegistry } from './services/pluginRegistry.js';
+import { notesConnector } from './connectors/notesConnector.js';
+import { tasksConnector } from './connectors/tasksConnector.js';
+import { knowledgeConnector } from './connectors/knowledgeConnector.js';
+import { whatsappConnector } from './connectors/whatsappConnector.js';
+import { googleWorkspaceConnector } from './connectors/googleWorkspaceConnector.js';
+import { whatsappService } from './services/whatsappService.js';
+import { getOrCreateCert } from './certs/certHelper.js';
+
+// Register initial connectors
+pluginRegistry.register(notesConnector);
+pluginRegistry.register(tasksConnector);
+pluginRegistry.register(knowledgeConnector);
+pluginRegistry.register(whatsappConnector);
+pluginRegistry.register(googleWorkspaceConnector);
+
+const app = express();
+
+const PORT = 5000;
+const CLIENT_ORIGIN = 'https://localhost:3000';
+
+app.use(cors({ origin: true, credentials: true }));
+app.use(express.json({ limit: '10mb' }));
+
+// Health check
+app.get('/api/health', (req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    name: 'Aura Voice AI Assistant',
+    version: '1.0.0',
+    googleConnected: googleAuth.isAuthenticated(),
+  });
+});
+
+// User Profile & Emotional Context
+app.get('/api/user/profile', (req: Request, res: Response) => {
+  res.json(db.getProfile());
+});
+
+app.post('/api/user/profile', (req: Request, res: Response) => {
+  const updated = db.updateProfile(req.body);
+  res.json(updated);
+});
+
+// Chats
+app.get('/api/chats', (req: Request, res: Response) => {
+  res.json(db.getMessages());
+});
+
+app.post('/api/chats', (req: Request, res: Response) => {
+  const { content, role, mediaType } = req.body;
+  const msg = db.addMessage({ content, role: role || 'user', mediaType: mediaType || 'text' });
+  res.json(msg);
+});
+
+app.delete('/api/chats', (req: Request, res: Response) => {
+  db.clearMessages();
+  res.json({ success: true });
+});
+
+// Tasks
+app.get('/api/tasks', (req: Request, res: Response) => {
+  res.json(db.getTasks());
+});
+
+app.post('/api/tasks', (req: Request, res: Response) => {
+  const task = db.addTask(req.body);
+  res.json(task);
+});
+
+app.patch('/api/tasks/:id', (req: Request, res: Response) => {
+  db.updateTask(req.params.id as string, req.body);
+  res.json({ success: true });
+});
+
+app.delete('/api/tasks', (req: Request, res: Response) => {
+  db.clearTasks();
+  res.json({ success: true, message: 'Tasks cleared' });
+});
+
+// Notes
+app.get('/api/notes', (req: Request, res: Response) => {
+  res.json(db.getNotes());
+});
+
+app.post('/api/notes', (req: Request, res: Response) => {
+  const note = db.addNote(req.body);
+  res.json(note);
+});
+
+// Connectors / Plugins
+app.get('/api/plugins', (req: Request, res: Response) => {
+  res.json(pluginRegistry.getStatusList());
+});
+
+app.post('/api/plugins/toggle', (req: Request, res: Response) => {
+  const { id, enabled } = req.body;
+  db.toggleConnector(id, enabled);
+  res.json({ success: true });
+});
+
+import { insightsService } from './services/insightsService.js';
+
+// Actionable Stories Feed (WhatsApp Stories style cards)
+app.get('/api/stories', async (req: Request, res: Response) => {
+  try {
+    const stories = await insightsService.getActionableStories();
+    res.json(stories);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch stories' });
+  }
+});
+
+// Direct Orchestration Chat
+app.post('/api/agent/chat', async (req: Request, res: Response) => {
+  const { message, mode } = req.body;
+  if (!message) {
+    res.status(400).json({ error: 'Message is required' });
+    return;
+  }
+  try {
+    const result = await orchestrator.processRawInput(message, mode || 'text');
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Internal error' });
+  }
+});
+
+// Google OAuth Endpoints
+app.get('/api/auth/google/details', (req: Request, res: Response) => {
+  const host = req.headers.host || '';
+  res.json(googleAuth.getOAuthDetails(host));
+});
+
+app.get('/api/auth/google/url', (req: Request, res: Response) => {
+  const host = req.headers.host || '';
+  const isCloudflare = host.includes('trycloudflare.com');
+  const redirectUri = isCloudflare ? `https://${host}/api/auth/google/callback` : undefined;
+  const url = googleAuth.getAuthUrl(redirectUri);
+  res.json({ url });
+});
+
+app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
+  const code = req.query.code as string;
+  const host = req.headers.host || '';
+  const isCloudflare = host.includes('trycloudflare.com');
+  const redirectUri = isCloudflare ? `https://${host}/api/auth/google/callback` : undefined;
+  const returnOrigin = isCloudflare ? `https://${host}` : CLIENT_ORIGIN;
+
+  if (!code) {
+    res.redirect(`${returnOrigin}/?auth=error&reason=no_code`);
+    return;
+  }
+
+  const result = await googleAuth.handleCallback(code, redirectUri);
+  if (result.success) {
+    res.redirect(`${returnOrigin}/?auth=success&email=${encodeURIComponent(result.email || '')}`);
+  } else {
+    res.redirect(`${returnOrigin}/?auth=error&reason=${encodeURIComponent(result.error || 'unknown')}`);
+  }
+});
+
+app.post('/api/auth/google/disconnect', (req: Request, res: Response) => {
+  googleAuth.disconnect();
+  res.json({ success: true, message: 'Google account disconnected' });
+});
+
+// WhatsApp Multi-Device Endpoints
+app.get('/api/whatsapp/saved-phone', (req: Request, res: Response) => {
+  res.json({ phone: db.getSavedWhatsAppPhone() || null });
+});
+
+app.post('/api/whatsapp/saved-phone', (req: Request, res: Response) => {
+  const { phone } = req.body || {};
+  if (!phone || phone.replace(/[^0-9]/g, '').length < 10) {
+    res.status(400).json({ error: 'Please provide a valid 10-digit mobile number' });
+    return;
+  }
+  db.saveWhatsAppPhone(phone);
+  res.json({ success: true, phone: db.getSavedWhatsAppPhone() });
+});
+
+app.get('/api/whatsapp/status', (req: Request, res: Response) => {
+  res.json(whatsappService.getStatus());
+});
+
+app.post('/api/whatsapp/connect', async (req: Request, res: Response) => {
+  try {
+    const { phoneNumber } = req.body || {};
+    await whatsappService.connect(phoneNumber);
+    res.json({ success: true, status: whatsappService.getStatus() });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/whatsapp/pairing-code', async (req: Request, res: Response) => {
+  const { phoneNumber } = req.body;
+  if (!phoneNumber) {
+    res.status(400).json({ error: 'phoneNumber is required (e.g. 15551234567)' });
+    return;
+  }
+  try {
+    const code = await whatsappService.requestPairingCode(phoneNumber);
+    res.json({ success: true, pairingCode: code });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to request pairing code' });
+  }
+});
+
+app.post('/api/whatsapp/disconnect', (req: Request, res: Response) => {
+  whatsappService.disconnect();
+  res.json({ success: true, message: 'WhatsApp session disconnected' });
+});
+
+app.get('/api/whatsapp/messages', (req: Request, res: Response) => {
+  const currentPhone = whatsappService.getStatus().user?.phone || whatsappService.getStatus().savedPhone || undefined;
+  res.json(db.getWhatsAppMessages(currentPhone));
+});
+
+app.delete('/api/whatsapp/messages', (req: Request, res: Response) => {
+  db.clearWhatsAppMessages();
+  res.json({ success: true, message: 'WhatsApp messages cleared' });
+});
+
+app.get('/api/whatsapp/summary', async (req: Request, res: Response) => {
+  try {
+    const summary = await whatsappService.getUpdatesSummary();
+    res.json({ summary });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/whatsapp/send', async (req: Request, res: Response) => {
+  const { to, message } = req.body;
+  if (!to || !message) {
+    res.status(400).json({ error: 'to and message are required' });
+    return;
+  }
+  try {
+    const result = await whatsappService.sendMessage(to, message);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Notifications & Queue Endpoints
+app.get('/api/notifications', (req: Request, res: Response) => {
+  res.json(db.getNotifications());
+});
+
+app.post('/api/notifications/read', (req: Request, res: Response) => {
+  db.markAllNotificationsRead();
+  res.json({ success: true });
+});
+
+app.delete('/api/notifications', (req: Request, res: Response) => {
+  db.clearNotifications();
+  res.json({ success: true, message: 'Notifications cleared' });
+});
+
+// Modular Admin Settings Endpoints
+app.get('/api/admin/settings', (req: Request, res: Response) => {
+  res.json(db.getAdminSettings());
+});
+
+app.post('/api/admin/settings', (req: Request, res: Response) => {
+  const updated = db.updateAdminSettings(req.body);
+  res.json({ success: true, settings: updated });
+});
+
+// Static files from built client
+const DIST_DIR = path.resolve(process.cwd(), 'dist');
+app.use(express.static(DIST_DIR));
+
+app.get('*', (req: Request, res: Response) => {
+  if (req.path.startsWith('/api') || req.path.startsWith('/ws')) {
+    return;
+  }
+  res.sendFile(path.join(DIST_DIR, 'index.html'));
+});
+
+async function startServer() {
+  const ssl = await getOrCreateCert();
+
+  // Create HTTPS Server on port 5000
+  const httpsServer = https.createServer({ key: ssl.key, cert: ssl.cert }, app);
+
+  // WebSocket Server for Gemini Live Real-time Audio Streaming attached to HTTPS server
+  const wss = new WebSocketServer({ server: httpsServer, path: '/ws/live' });
+
+  // Also create HTTP server on port 5001 for tunnels (Cloudflare tunnel / Tunnelmole / etc)
+  const HTTP_PORT = 5001;
+  const httpServer = http.createServer(app);
+  const httpWss = new WebSocketServer({ server: httpServer, path: '/ws/live' });
+
+  function setupWsHandling(serverInstance: WebSocketServer, label: string) {
+    serverInstance.on('connection', (ws: WebSocket) => {
+      console.log(`[WebSocket] Client connected to /ws/live (${label})`);
+      let activeLiveSession: any = null;
+
+      ws.on('message', async (data: Buffer | string) => {
+        try {
+          const msg = JSON.parse(data.toString());
+
+          if (msg.type === 'start') {
+            const voiceGender = msg.voice === 'male' ? 'male' : 'female';
+            console.log(`[WebSocket] Starting Gemini Live with voice gender: ${voiceGender}`);
+
+            if (activeLiveSession) {
+              activeLiveSession.close();
+              activeLiveSession = null;
+            }
+
+            activeLiveSession = await geminiLive.createLiveSession({
+              voice: voiceGender,
+              voiceName: msg.voiceName,
+              onAudioChunk: (base64Audio) => {
+                if (ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ type: 'audio', data: base64Audio }));
+                }
+              },
+              onTranscription: (role, text) => {
+                if (ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ type: 'transcription', role, text }));
+                }
+              },
+              onInterrupted: () => {
+                if (ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ type: 'interrupted' }));
+                }
+              },
+              onError: (err) => {
+                if (ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ type: 'error', error: err?.message || 'Live session error' }));
+                }
+              },
+              onClose: () => {
+                if (ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ type: 'closed' }));
+                }
+                activeLiveSession = null;
+              },
+            });
+
+            ws.send(JSON.stringify({ type: 'ready', voice: voiceGender }));
+          } else if (msg.type === 'audio' && activeLiveSession) {
+            activeLiveSession.sendAudioChunk(msg.data);
+          } else if (msg.type === 'audio_end' && activeLiveSession) {
+            activeLiveSession.sendAudioEnd();
+          } else if (msg.type === 'text' && activeLiveSession) {
+            activeLiveSession.sendText(msg.text);
+          } else if (msg.type === 'stop' && activeLiveSession) {
+            activeLiveSession.close();
+            activeLiveSession = null;
+            ws.send(JSON.stringify({ type: 'stopped' }));
+          }
+        } catch (err: any) {
+          console.error(`[WebSocket] Message handling error (${label}):`, err);
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'error', error: err.message }));
+          }
+        }
+      });
+
+      ws.on('close', () => {
+        console.log(`[WebSocket] Client disconnected (${label})`);
+        if (activeLiveSession) {
+          activeLiveSession.close();
+          activeLiveSession = null;
+        }
+      });
+
+      ws.on('error', (err) => {
+        console.error(`[WebSocket] Socket error (${label}):`, err);
+      });
+    });
+  }
+
+  setupWsHandling(wss, 'HTTPS/WSS');
+  setupWsHandling(httpWss, 'HTTP/WS');
+
+  httpServer.listen(HTTP_PORT, '0.0.0.0', () => {
+    console.log(` Aura AI Tunnel Port (HTTP):  http://localhost:${HTTP_PORT}`);
+  });
+
+  httpsServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`=======================================================`);
+    console.log(` Aura AI Server (HTTPS):      https://localhost:${PORT}`);
+    console.log(` Network Phone Access:        https://192.168.1.11:${PORT}`);
+    console.log(` WebSocket Live (WSS):        wss://localhost:${PORT}/ws/live`);
+    console.log(` Google OAuth Redirect URI:   https://localhost:${PORT}/api/auth/google/callback`);
+    console.log(` Authorized JavaScript Origin: https://localhost:3000, https://localhost:${PORT}`);
+    console.log(`=======================================================`);
+  });
+}
+
+startServer().catch((err) => {
+  console.error('[Server] Fatal startup error:', err);
+});

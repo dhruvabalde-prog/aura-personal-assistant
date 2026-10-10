@@ -1,0 +1,11 @@
+node_modules/
+.env
+dist/
+build/
+.baileys_auth/
+storage/
+*.log
+.DS_Store
+
+.vercel
+.env*
