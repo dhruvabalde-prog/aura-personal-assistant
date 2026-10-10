@@ -89,7 +89,7 @@ export const GoogleConnectModal: React.FC<GoogleConnectModalProps> = ({
                 onClick={onConnect}
                 className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-500 shadow-md shadow-indigo-600/30 transition-all cursor-pointer"
               >
-                <span>Authorize Now</span>
+                <span>Connect Google</span>
                 <ExternalLink className="w-3.5 h-3.5" />
               </button>
             )}

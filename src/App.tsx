@@ -62,7 +62,12 @@ export const App: React.FC = () => {
     if (email) {
       headers.set('x-user-email', email);
     }
-    return fetch(url, { ...options, headers });
+    // If the frontend is hosted on Vercel and calling /api, target the live backend tunnel
+    let targetUrl = url;
+    if (url.startsWith('/api') && window.location.hostname.includes('vercel.app')) {
+      targetUrl = `https://commitment-prerequisite-cage-snowboard.trycloudflare.com${url}`;
+    }
+    return fetch(targetUrl, { ...options, headers });
   };
 
   // WhatsApp state
@@ -170,8 +175,10 @@ export const App: React.FC = () => {
       return wsRef.current;
     }
 
+    const isVercel = window.location.hostname.includes('vercel.app');
+    const wsHost = isVercel ? 'commitment-prerequisite-cage-snowboard.trycloudflare.com' : window.location.host;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/live`;
+    const wsUrl = `${protocol}//${wsHost}/ws/live`;
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
@@ -363,12 +370,22 @@ export const App: React.FC = () => {
   // Google OAuth flow
   const handleConnectGoogle = async () => {
     try {
-      const res = await authFetch('/api/auth/google/url').then((r) => r.json());
-      if (res.url) {
-        window.location.href = res.url;
+      const res = await authFetch('/api/auth/google/url');
+      if (!res.ok) {
+        throw new Error(`Server returned HTTP ${res.status}: ${res.statusText}`);
       }
-    } catch (err) {
+      const data = await res.json();
+      if (data?.url) {
+        window.location.href = data.url;
+      } else {
+        alert('Could not retrieve Google authorization URL from server.');
+      }
+    } catch (err: any) {
       console.error('[App] Failed to get Google auth URL:', err);
+      alert(
+        'Could not start Google sign in. If you are on Vercel, please connect via your live backend tunnel or dev server: ' +
+          (err.message || err)
+      );
     }
   };
 
