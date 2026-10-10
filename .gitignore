@@ -3,7 +3,7 @@ node_modules/
 dist/
 build/
 .baileys_auth/
-storage/
+/storage/
 *.log
 .DS_Store
 

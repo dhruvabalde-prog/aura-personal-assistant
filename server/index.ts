@@ -16,6 +16,7 @@ import { knowledgeConnector } from './connectors/knowledgeConnector.js';
 import { whatsappConnector } from './connectors/whatsappConnector.js';
 import { googleWorkspaceConnector } from './connectors/googleWorkspaceConnector.js';
 import { whatsappService } from './services/whatsappService.js';
+import { supabaseService } from './services/supabaseService.js';
 import { getOrCreateCert } from './certs/certHelper.js';
 
 // Register initial connectors
@@ -203,6 +204,12 @@ app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
   const result = await googleAuth.handleCallback(code, redirectUri);
   if (result.success && result.email) {
     db.setActiveUserEmail(result.email);
+    try {
+      await supabaseService.getOrCreateUserId(result.email);
+      await db.hydrateUserFromSupabase(result.email);
+    } catch (err) {
+      console.warn('[Auth] Supabase cloud hydration warning:', err);
+    }
     res.redirect(`${returnOrigin}/?auth=success&email=${encodeURIComponent(result.email)}`);
   } else {
     res.redirect(`${returnOrigin}/?auth=error&reason=${encodeURIComponent(result.error || 'unknown')}`);
