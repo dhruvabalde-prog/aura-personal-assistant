@@ -182,28 +182,16 @@ app.get('/api/auth/google/details', (req: Request, res: Response) => {
 });
 
 app.get('/api/auth/google/url', (req: Request, res: Response) => {
-  const host = req.headers.host || '';
-  const isCloudflare = host.includes('trycloudflare.com');
-  const redirectUri = isCloudflare
-    ? `https://${host}/api/auth/google/callback`
-    : 'https://aura-personal-ai-tau.vercel.app/api/auth/google/callback';
+  // Canonical production redirect URI requested by user
+  const redirectUri = 'https://aura-personal-ai-tau.vercel.app/api/auth/google/callback';
   const url = googleAuth.getAuthUrl(redirectUri);
-  res.json({ url });
+  res.json({ url, redirectUri });
 });
 
 app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
   const code = req.query.code as string;
-  const host = req.headers.host || '';
-  const isCloudflare = host.includes('trycloudflare.com');
-  const isVercel = host.includes('vercel.app');
-  const redirectUri = isCloudflare
-    ? `https://${host}/api/auth/google/callback`
-    : 'https://aura-personal-ai-tau.vercel.app/api/auth/google/callback';
-  const returnOrigin = isVercel
-    ? 'https://aura-personal-ai-tau.vercel.app'
-    : isCloudflare
-    ? `https://${host}`
-    : CLIENT_ORIGIN;
+  const redirectUri = 'https://aura-personal-ai-tau.vercel.app/api/auth/google/callback';
+  const returnOrigin = 'https://aura-personal-ai-tau.vercel.app';
 
   if (!code) {
     res.redirect(`${returnOrigin}/?auth=error&reason=no_code`);
