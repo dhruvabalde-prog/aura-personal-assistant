@@ -49,15 +49,16 @@ export class GoogleAuthService {
     });
   }
 
-  getOAuthDetails(host?: string) {
+  getOAuthDetails(host?: string, userEmail?: string) {
     const isCloudflare = host && host.includes('trycloudflare.com');
     const effectiveRedirectUri = isCloudflare
       ? `https://${host}/api/auth/google/callback`
       : REDIRECT_URI;
 
+    const tokens = db.getGoogleTokens(userEmail);
     return {
-      connected: this.isAuthenticated(),
-      userEmail: db.getGoogleTokens()?.userEmail || null,
+      connected: this.isAuthenticated(userEmail),
+      userEmail: tokens?.userEmail || (userEmail && userEmail !== 'guest' ? userEmail : null),
       redirectUri: effectiveRedirectUri,
       origins: [
         'https://localhost:3000',
@@ -99,7 +100,7 @@ export class GoogleAuthService {
         console.warn('[Google Auth] Could not fetch user email info:', err);
       }
 
-      db.saveGoogleTokens({
+      db.saveGoogleTokens(userEmail, {
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
         expiry_date: tokens.expiry_date,
@@ -116,13 +117,13 @@ export class GoogleAuthService {
     }
   }
 
-  isAuthenticated(): boolean {
-    const tokens = db.getGoogleTokens();
+  isAuthenticated(userEmail?: string): boolean {
+    const tokens = db.getGoogleTokens(userEmail);
     return !!(tokens && (tokens.access_token || tokens.refresh_token));
   }
 
-  getClient() {
-    const tokens = db.getGoogleTokens();
+  getClient(userEmail?: string) {
+    const tokens = db.getGoogleTokens(userEmail);
     if (tokens && tokens.access_token) {
       this.oauth2Client.setCredentials({
         access_token: tokens.access_token,
@@ -135,8 +136,8 @@ export class GoogleAuthService {
     return this.oauth2Client;
   }
 
-  disconnect() {
-    db.saveGoogleTokens(null);
+  disconnect(userEmail?: string) {
+    db.saveGoogleTokens(userEmail, null);
     this.oauth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
   }
 }

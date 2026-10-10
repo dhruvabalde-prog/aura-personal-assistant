@@ -39,6 +39,9 @@ interface WhatsAppConnectModalProps {
   onRequestPairingCode: (phone: string) => Promise<string | null>;
   onDisconnect: () => Promise<void>;
   onRefresh: () => Promise<void>;
+  isGoogleConnected?: boolean;
+  userEmail?: string | null;
+  onConnectGoogle?: () => void;
 }
 
 export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
@@ -49,6 +52,9 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
   onRequestPairingCode,
   onDisconnect,
   onRefresh,
+  isGoogleConnected = false,
+  userEmail = null,
+  onConnectGoogle,
 }) => {
   const [tab, setTab] = useState<'code' | 'qr'>('code');
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -64,7 +70,9 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
   // Load saved phone on open
   useEffect(() => {
     if (isOpen) {
-      fetch('/api/whatsapp/saved-phone')
+      fetch('/api/whatsapp/saved-phone', {
+        headers: { 'x-user-email': userEmail || '' },
+      })
         .then((r) => r.json())
         .then((data) => {
           if (data.phone) {
@@ -80,7 +88,7 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
           setIsEditingPhone(true);
         });
     }
-  }, [isOpen]);
+  }, [isOpen, userEmail]);
 
   // Sync savedPhone from status if available
   useEffect(() => {
@@ -125,7 +133,10 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
     try {
       const res = await fetch('/api/whatsapp/saved-phone', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-email': userEmail || '',
+        },
         body: JSON.stringify({ phone: clean }),
       });
       const data = await res.json();
@@ -228,6 +239,7 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-fade-in select-none">
       <div className="relative w-full max-w-md bg-[#0d0f17] border border-slate-800 rounded-2xl p-6 shadow-2xl overflow-y-auto max-h-[92vh]">
         {/* Header */}
+        {/* Header workspace label */}
         <div className="flex items-center justify-between pb-4 border-b border-slate-800">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
@@ -235,7 +247,9 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
             </div>
             <div>
               <h3 className="text-base font-semibold text-white">Connect WhatsApp</h3>
-              <p className="text-xs text-slate-400">Private Isolated Session (Multi-Device)</p>
+              <p className="text-xs text-slate-400">
+                {userEmail ? `Workspace: ${userEmail}` : 'Private Multi-Device Session'}
+              </p>
             </div>
           </div>
           <button
@@ -246,12 +260,40 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
           </button>
         </div>
 
-        {/* Status Banner */}
-        <div className="mt-4 p-3.5 rounded-xl bg-slate-900/90 border border-slate-800">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div
-                className={`w-3 h-3 rounded-full ${
+        {/* Step 1 Required Gate if Google Workspace is not connected */}
+        {!isGoogleConnected ? (
+          <div className="my-6 py-6 px-4 rounded-2xl bg-indigo-950/30 border border-indigo-500/20 text-center space-y-4">
+            <div className="w-12 h-12 mx-auto rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+              <ShieldCheck className="w-6 h-6" />
+            </div>
+            <div>
+              <h4 className="text-base font-bold text-white">Connect Google Workspace First</h4>
+              <p className="text-xs text-slate-300 mt-1 max-w-xs mx-auto leading-relaxed">
+                To guarantee complete privacy, your phone number, pairing codes, and WhatsApp messages are securely partitioned under your Google account.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                onClose();
+                if (onConnectGoogle) onConnectGoogle();
+              }}
+              className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              Sign in with Google First
+            </button>
+            <p className="text-[11px] text-slate-400">
+              Step 1 of 2 • Then enter your phone number to pair WhatsApp
+            </p>
+          </div>
+        ) : (
+          <>
+            {/* Status Banner */}
+            <div className="mt-4 p-3.5 rounded-xl bg-slate-900/90 border border-slate-800">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-3 h-3 rounded-full ${
                   isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
                 }`}
               />
@@ -637,6 +679,8 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
             </div>
           </div>
         )}
+      </>
+    )}
 
         {/* Footer */}
         <div className="mt-5 pt-4 border-t border-slate-800 flex justify-end">

@@ -50,6 +50,21 @@ export const App: React.FC = () => {
     origins: string[];
   } | null>(null);
 
+  // Active User Email State
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(() => {
+    return localStorage.getItem('aura_user_email') || null;
+  });
+
+  // Authenticated fetch wrapper that automatically attaches the user identity header
+  const authFetch = (url: string, options: RequestInit = {}) => {
+    const headers = new Headers(options.headers || {});
+    const email = currentUserEmail || localStorage.getItem('aura_user_email');
+    if (email) {
+      headers.set('x-user-email', email);
+    }
+    return fetch(url, { ...options, headers });
+  };
+
   // WhatsApp state
   const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
   const [whatsappStatus, setWhatsappStatus] = useState<WhatsAppStatusData | null>(null);
@@ -62,15 +77,15 @@ export const App: React.FC = () => {
   const fetchData = async () => {
     try {
       const [chatsRes, tasksRes, notesRes, pluginsRes, profileRes, oauthRes, waRes, notifRes, adminRes] = await Promise.all([
-        fetch('/api/chats').then((r) => r.json()),
-        fetch('/api/tasks').then((r) => r.json()),
-        fetch('/api/notes').then((r) => r.json()),
-        fetch('/api/plugins').then((r) => r.json()),
-        fetch('/api/user/profile').then((r) => r.json()),
-        fetch('/api/auth/google/details').then((r) => r.json()),
-        fetch('/api/whatsapp/status').then((r) => r.json()),
-        fetch('/api/notifications').then((r) => r.json()),
-        fetch('/api/admin/settings').then((r) => r.json()),
+        authFetch('/api/chats').then((r) => r.json()),
+        authFetch('/api/tasks').then((r) => r.json()),
+        authFetch('/api/notes').then((r) => r.json()),
+        authFetch('/api/plugins').then((r) => r.json()),
+        authFetch('/api/user/profile').then((r) => r.json()),
+        authFetch('/api/auth/google/details').then((r) => r.json()),
+        authFetch('/api/whatsapp/status').then((r) => r.json()),
+        authFetch('/api/notifications').then((r) => r.json()),
+        authFetch('/api/admin/settings').then((r) => r.json()),
       ]);
 
       setMessages(chatsRes);
@@ -81,6 +96,11 @@ export const App: React.FC = () => {
       setOauthDetails(oauthRes);
       setWhatsappStatus(waRes);
       setAdminSettings(adminRes);
+
+      if (oauthRes?.userEmail && !currentUserEmail) {
+        localStorage.setItem('aura_user_email', oauthRes.userEmail);
+        setCurrentUserEmail(oauthRes.userEmail);
+      }
 
       if (Array.isArray(notifRes)) {
         setNotifications(notifRes);
@@ -107,7 +127,7 @@ export const App: React.FC = () => {
 
     // Regular light poll for notifications and background queue
     const pollInterval = setInterval(() => {
-      fetch('/api/notifications')
+      authFetch('/api/notifications')
         .then((r) => r.json())
         .then((notifs: NotificationItem[]) => {
           if (Array.isArray(notifs)) {
@@ -127,8 +147,13 @@ export const App: React.FC = () => {
     // Check for auth callback in URL
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('auth') === 'success') {
+      const email = urlParams.get('email');
+      if (email) {
+        localStorage.setItem('aura_user_email', email);
+        setCurrentUserEmail(email);
+      }
       chimeAudio.playDing();
-      alert(`Google Workspace authorized successfully for ${urlParams.get('email') || 'your account'}!`);
+      alert(`Google Workspace authorized successfully for ${email || 'your account'}! Your unique workspace is ready.`);
       window.history.replaceState({}, document.title, window.location.pathname);
       fetchData();
     } else if (urlParams.get('auth') === 'error') {
@@ -137,7 +162,7 @@ export const App: React.FC = () => {
     }
 
     return () => clearInterval(pollInterval);
-  }, []);
+  }, [currentUserEmail]);
 
   // WebSocket Live Audio setup
   const initWebSocket = () => {
@@ -260,7 +285,7 @@ export const App: React.FC = () => {
     setIsChatLoading(true);
     setTranscript({ user: text });
     try {
-      const res = await fetch('/api/agent/chat', {
+      const res = await authFetch('/api/agent/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, mode: 'text' }),
@@ -277,7 +302,7 @@ export const App: React.FC = () => {
 
   const handleClearChat = async () => {
     if (confirm('Clear all conversation history?')) {
-      await fetch('/api/chats', { method: 'DELETE' });
+      await authFetch('/api/chats', { method: 'DELETE' });
       setMessages([]);
       setTranscript({});
     }
@@ -285,7 +310,7 @@ export const App: React.FC = () => {
 
   // Tasks actions
   const handleToggleTask = async (taskId: string, completed: boolean) => {
-    await fetch(`/api/tasks/${taskId}`, {
+    await authFetch(`/api/tasks/${taskId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ completed }),
@@ -294,7 +319,7 @@ export const App: React.FC = () => {
   };
 
   const handleAddTask = async (title: string, deadline?: string) => {
-    const res = await fetch('/api/tasks', {
+    const res = await authFetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, deadline, urgency: 'medium', source: 'voice', completed: false }),
@@ -305,7 +330,7 @@ export const App: React.FC = () => {
 
   // Notes actions
   const handleAddNote = async (title: string, content: string) => {
-    const res = await fetch('/api/notes', {
+    const res = await authFetch('/api/notes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, content, tags: ['quick-note'] }),
@@ -316,7 +341,7 @@ export const App: React.FC = () => {
 
   // Plugins toggle
   const handleTogglePlugin = async (id: string, enabled: boolean) => {
-    await fetch('/api/plugins/toggle', {
+    await authFetch('/api/plugins/toggle', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, enabled }),
@@ -326,7 +351,7 @@ export const App: React.FC = () => {
 
   // Profile update
   const handleUpdateProfile = async (updates: Partial<UserProfileData>) => {
-    const res = await fetch('/api/user/profile', {
+    const res = await authFetch('/api/user/profile', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updates),
@@ -338,7 +363,7 @@ export const App: React.FC = () => {
   // Google OAuth flow
   const handleConnectGoogle = async () => {
     try {
-      const res = await fetch('/api/auth/google/url').then((r) => r.json());
+      const res = await authFetch('/api/auth/google/url').then((r) => r.json());
       if (res.url) {
         window.location.href = res.url;
       }
@@ -349,43 +374,45 @@ export const App: React.FC = () => {
 
   const handleDisconnectGoogle = async () => {
     if (confirm('Disconnect Google Workspace account?')) {
-      await fetch('/api/auth/google/disconnect', { method: 'POST' });
+      await authFetch('/api/auth/google/disconnect', { method: 'POST' });
+      localStorage.removeItem('aura_user_email');
+      setCurrentUserEmail(null);
       fetchData();
     }
   };
 
   const handleConnectWhatsApp = async (phone?: string) => {
-    await fetch('/api/whatsapp/connect', {
+    await authFetch('/api/whatsapp/connect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ phoneNumber: phone }),
     });
-    const status = await fetch('/api/whatsapp/status').then((r) => r.json());
+    const status = await authFetch('/api/whatsapp/status').then((r) => r.json());
     setWhatsappStatus(status);
   };
 
   const handleRequestWhatsAppPairingCode = async (phone: string) => {
-    const res = await fetch('/api/whatsapp/pairing-code', {
+    const res = await authFetch('/api/whatsapp/pairing-code', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ phoneNumber: phone }),
     });
     const data = await res.json();
-    const status = await fetch('/api/whatsapp/status').then((r) => r.json());
+    const status = await authFetch('/api/whatsapp/status').then((r) => r.json());
     setWhatsappStatus(status);
     return data.pairingCode || null;
   };
 
   const handleDisconnectWhatsApp = async () => {
     if (confirm('Disconnect WhatsApp device?')) {
-      await fetch('/api/whatsapp/disconnect', { method: 'POST' });
-      const status = await fetch('/api/whatsapp/status').then((r) => r.json());
+      await authFetch('/api/whatsapp/disconnect', { method: 'POST' });
+      const status = await authFetch('/api/whatsapp/status').then((r) => r.json());
       setWhatsappStatus(status);
     }
   };
 
   const handleRefreshWhatsApp = async () => {
-    const status = await fetch('/api/whatsapp/status').then((r) => r.json());
+    const status = await authFetch('/api/whatsapp/status').then((r) => r.json());
     setWhatsappStatus(status);
   };
 
@@ -398,6 +425,11 @@ export const App: React.FC = () => {
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           <span className="text-xs font-semibold tracking-wider text-slate-200 uppercase">Aura</span>
+          {(oauthDetails?.userEmail || currentUserEmail) && (
+            <span className="text-[10px] text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded-full border border-indigo-500/20 max-w-[120px] truncate">
+              {oauthDetails?.userEmail || currentUserEmail}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -454,6 +486,27 @@ export const App: React.FC = () => {
           </button>
         </div>
       </header>
+
+      {/* Google First Workspace Gate Banner */}
+      {!oauthDetails?.connected && (
+        <div className="mx-4 mt-3 p-3.5 rounded-2xl bg-gradient-to-r from-indigo-950/60 to-purple-950/40 border border-indigo-500/30 flex items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
+              <Shield className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-white">Step 1: Sign in with Google First</p>
+              <p className="text-[11px] text-slate-300">Creates your private, isolated workspace before connecting WhatsApp.</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsGoogleModalOpen(true)}
+            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shrink-0 cursor-pointer shadow-md shadow-indigo-600/30"
+          >
+            Sign In
+          </button>
+        </div>
+      )}
 
       {/* Main Content by Tab */}
       <main className="flex-1 overflow-hidden">
@@ -544,7 +597,7 @@ export const App: React.FC = () => {
         onClose={() => setIsNotificationsOpen(false)}
         notifications={notifications}
         onMarkAsRead={async (id) => {
-          await fetch('/api/notifications/read', {
+          await authFetch('/api/notifications/read', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id }),
@@ -561,7 +614,7 @@ export const App: React.FC = () => {
         onClose={() => setIsAdminOpen(false)}
         settings={adminSettings}
         onSaveSettings={async (newSettings) => {
-          const res = await fetch('/api/admin/settings', {
+          const res = await authFetch('/api/admin/settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(newSettings),
@@ -590,6 +643,9 @@ export const App: React.FC = () => {
         onRequestPairingCode={handleRequestWhatsAppPairingCode}
         onDisconnect={handleDisconnectWhatsApp}
         onRefresh={handleRefreshWhatsApp}
+        isGoogleConnected={!!oauthDetails?.connected}
+        userEmail={oauthDetails?.userEmail || currentUserEmail}
+        onConnectGoogle={handleConnectGoogle}
       />
     </div>
   );

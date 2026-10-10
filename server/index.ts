@@ -33,81 +33,116 @@ const CLIENT_ORIGIN = 'https://localhost:3000';
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 
+function getUserEmail(req: Request): string {
+  const header = req.headers['x-user-email'];
+  if (header && typeof header === 'string' && header.trim() && header !== 'null' && header !== 'undefined') {
+    return header.trim().toLowerCase();
+  }
+  const query = req.query.userEmail;
+  if (query && typeof query === 'string' && query.trim() && query !== 'null' && query !== 'undefined') {
+    return query.trim().toLowerCase();
+  }
+  const body = req.body?.userEmail;
+  if (body && typeof body === 'string' && body.trim() && body !== 'null' && body !== 'undefined') {
+    return body.trim().toLowerCase();
+  }
+  return db.getActiveUserEmail() || 'guest';
+}
+
 // Health check
 app.get('/api/health', (req: Request, res: Response) => {
+  const email = getUserEmail(req);
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     name: 'Aura Voice AI Assistant',
     version: '1.0.0',
-    googleConnected: googleAuth.isAuthenticated(),
+    userEmail: email !== 'guest' ? email : null,
+    googleConnected: googleAuth.isAuthenticated(email),
   });
 });
 
 // User Profile & Emotional Context
 app.get('/api/user/profile', (req: Request, res: Response) => {
-  res.json(db.getProfile());
+  const email = getUserEmail(req);
+  res.json(db.getProfile(email));
 });
 
 app.post('/api/user/profile', (req: Request, res: Response) => {
-  const updated = db.updateProfile(req.body);
+  const email = getUserEmail(req);
+  const updated = db.updateProfile(email, req.body);
   res.json(updated);
 });
 
 // Chats
 app.get('/api/chats', (req: Request, res: Response) => {
-  res.json(db.getMessages());
+  const email = getUserEmail(req);
+  res.json(db.getMessages(email));
 });
 
 app.post('/api/chats', (req: Request, res: Response) => {
+  const email = getUserEmail(req);
   const { content, role, mediaType } = req.body;
-  const msg = db.addMessage({ content, role: role || 'user', mediaType: mediaType || 'text' });
+  const msg = db.addMessage(email, { content, role: role || 'user', mediaType: mediaType || 'text' });
   res.json(msg);
 });
 
 app.delete('/api/chats', (req: Request, res: Response) => {
-  db.clearMessages();
+  const email = getUserEmail(req);
+  db.clearMessages(email);
   res.json({ success: true });
 });
 
 // Tasks
 app.get('/api/tasks', (req: Request, res: Response) => {
-  res.json(db.getTasks());
+  const email = getUserEmail(req);
+  res.json(db.getTasks(email));
 });
 
 app.post('/api/tasks', (req: Request, res: Response) => {
-  const task = db.addTask(req.body);
+  const email = getUserEmail(req);
+  const task = db.addTask(email, req.body);
   res.json(task);
 });
 
 app.patch('/api/tasks/:id', (req: Request, res: Response) => {
-  db.updateTask(req.params.id as string, req.body);
+  const email = getUserEmail(req);
+  db.updateTask(email, req.params.id as string, req.body);
   res.json({ success: true });
 });
 
 app.delete('/api/tasks', (req: Request, res: Response) => {
-  db.clearTasks();
+  const email = getUserEmail(req);
+  db.clearTasks(email);
   res.json({ success: true, message: 'Tasks cleared' });
 });
 
 // Notes
 app.get('/api/notes', (req: Request, res: Response) => {
-  res.json(db.getNotes());
+  const email = getUserEmail(req);
+  res.json(db.getNotes(email));
 });
 
 app.post('/api/notes', (req: Request, res: Response) => {
-  const note = db.addNote(req.body);
+  const email = getUserEmail(req);
+  const note = db.addNote(email, req.body);
   res.json(note);
 });
 
 // Connectors / Plugins
 app.get('/api/plugins', (req: Request, res: Response) => {
-  res.json(pluginRegistry.getStatusList());
+  const email = getUserEmail(req);
+  const list = pluginRegistry.getStatusList().map((item) => {
+    const userConnector = db.getConnectors(email).find((c) => c.id === item.id);
+    return userConnector ? { ...item, enabled: userConnector.enabled } : item;
+  });
+  res.json(list);
 });
 
 app.post('/api/plugins/toggle', (req: Request, res: Response) => {
+  const email = getUserEmail(req);
   const { id, enabled } = req.body;
-  db.toggleConnector(id, enabled);
+  db.toggleConnector(email, id, enabled);
   res.json({ success: true });
 });
 
@@ -141,7 +176,8 @@ app.post('/api/agent/chat', async (req: Request, res: Response) => {
 // Google OAuth Endpoints
 app.get('/api/auth/google/details', (req: Request, res: Response) => {
   const host = req.headers.host || '';
-  res.json(googleAuth.getOAuthDetails(host));
+  const email = getUserEmail(req);
+  res.json(googleAuth.getOAuthDetails(host, email));
 });
 
 app.get('/api/auth/google/url', (req: Request, res: Response) => {
@@ -165,55 +201,62 @@ app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
   }
 
   const result = await googleAuth.handleCallback(code, redirectUri);
-  if (result.success) {
-    res.redirect(`${returnOrigin}/?auth=success&email=${encodeURIComponent(result.email || '')}`);
+  if (result.success && result.email) {
+    db.setActiveUserEmail(result.email);
+    res.redirect(`${returnOrigin}/?auth=success&email=${encodeURIComponent(result.email)}`);
   } else {
     res.redirect(`${returnOrigin}/?auth=error&reason=${encodeURIComponent(result.error || 'unknown')}`);
   }
 });
 
 app.post('/api/auth/google/disconnect', (req: Request, res: Response) => {
-  googleAuth.disconnect();
+  const email = getUserEmail(req);
+  googleAuth.disconnect(email);
   res.json({ success: true, message: 'Google account disconnected' });
 });
 
 // WhatsApp Multi-Device Endpoints
 app.get('/api/whatsapp/saved-phone', (req: Request, res: Response) => {
-  res.json({ phone: db.getSavedWhatsAppPhone() || null });
+  const email = getUserEmail(req);
+  res.json({ phone: db.getSavedWhatsAppPhone(email) || null });
 });
 
 app.post('/api/whatsapp/saved-phone', (req: Request, res: Response) => {
+  const email = getUserEmail(req);
   const { phone } = req.body || {};
   if (!phone || phone.replace(/[^0-9]/g, '').length < 10) {
     res.status(400).json({ error: 'Please provide a valid 10-digit mobile number' });
     return;
   }
-  db.saveWhatsAppPhone(phone);
-  res.json({ success: true, phone: db.getSavedWhatsAppPhone() });
+  db.saveWhatsAppPhone(email, phone);
+  res.json({ success: true, phone: db.getSavedWhatsAppPhone(email) });
 });
 
 app.get('/api/whatsapp/status', (req: Request, res: Response) => {
-  res.json(whatsappService.getStatus());
+  const email = getUserEmail(req);
+  res.json(whatsappService.getStatus(email));
 });
 
 app.post('/api/whatsapp/connect', async (req: Request, res: Response) => {
   try {
+    const email = getUserEmail(req);
     const { phoneNumber } = req.body || {};
-    await whatsappService.connect(phoneNumber);
-    res.json({ success: true, status: whatsappService.getStatus() });
+    await whatsappService.connect(phoneNumber, email);
+    res.json({ success: true, status: whatsappService.getStatus(email) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
 app.post('/api/whatsapp/pairing-code', async (req: Request, res: Response) => {
+  const email = getUserEmail(req);
   const { phoneNumber } = req.body;
   if (!phoneNumber) {
     res.status(400).json({ error: 'phoneNumber is required (e.g. 15551234567)' });
     return;
   }
   try {
-    const code = await whatsappService.requestPairingCode(phoneNumber);
+    const code = await whatsappService.requestPairingCode(phoneNumber, email);
     res.json({ success: true, pairingCode: code });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to request pairing code' });
@@ -221,23 +264,27 @@ app.post('/api/whatsapp/pairing-code', async (req: Request, res: Response) => {
 });
 
 app.post('/api/whatsapp/disconnect', (req: Request, res: Response) => {
-  whatsappService.disconnect();
+  const email = getUserEmail(req);
+  whatsappService.disconnect(email);
   res.json({ success: true, message: 'WhatsApp session disconnected' });
 });
 
 app.get('/api/whatsapp/messages', (req: Request, res: Response) => {
-  const currentPhone = whatsappService.getStatus().user?.phone || whatsappService.getStatus().savedPhone || undefined;
-  res.json(db.getWhatsAppMessages(currentPhone));
+  const email = getUserEmail(req);
+  const currentPhone = whatsappService.getStatus(email).user?.phone || whatsappService.getStatus(email).savedPhone || undefined;
+  res.json(db.getWhatsAppMessages(email, currentPhone));
 });
 
 app.delete('/api/whatsapp/messages', (req: Request, res: Response) => {
-  db.clearWhatsAppMessages();
+  const email = getUserEmail(req);
+  db.clearWhatsAppMessages(email);
   res.json({ success: true, message: 'WhatsApp messages cleared' });
 });
 
 app.get('/api/whatsapp/summary', async (req: Request, res: Response) => {
+  const email = getUserEmail(req);
   try {
-    const summary = await whatsappService.getUpdatesSummary();
+    const summary = await whatsappService.getUpdatesSummary(email);
     res.json({ summary });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -260,16 +307,19 @@ app.post('/api/whatsapp/send', async (req: Request, res: Response) => {
 
 // Notifications & Queue Endpoints
 app.get('/api/notifications', (req: Request, res: Response) => {
-  res.json(db.getNotifications());
+  const email = getUserEmail(req);
+  res.json(db.getNotifications(email));
 });
 
 app.post('/api/notifications/read', (req: Request, res: Response) => {
-  db.markAllNotificationsRead();
+  const email = getUserEmail(req);
+  db.markAllNotificationsRead(email);
   res.json({ success: true });
 });
 
 app.delete('/api/notifications', (req: Request, res: Response) => {
-  db.clearNotifications();
+  const email = getUserEmail(req);
+  db.clearNotifications(email);
   res.json({ success: true, message: 'Notifications cleared' });
 });
 

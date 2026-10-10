@@ -41,38 +41,47 @@ export class WhatsAppService {
   private userName: string | null = null;
   private isInitializing: boolean = false;
   private activeAuthDir: string = path.join(BASE_AUTH_DIR, 'default');
+  private currentActiveUserEmail: string = 'default';
 
   constructor() {
-    // Check if a saved phone number or existing authenticated session exists
-    const savedPhone = db.getSavedWhatsAppPhone();
+    // Check if an active user exists
+    const activeEmail = db.getActiveUserEmail();
+    if (activeEmail) {
+      this.currentActiveUserEmail = activeEmail;
+    }
+    const savedPhone = db.getSavedWhatsAppPhone(this.currentActiveUserEmail);
     if (savedPhone) {
       this.userPhone = savedPhone;
-      this.activeAuthDir = path.join(BASE_AUTH_DIR, `user_${savedPhone}`);
+      const userFolder = this.currentActiveUserEmail !== 'default' && this.currentActiveUserEmail !== 'guest'
+        ? this.currentActiveUserEmail.replace(/[^a-zA-Z0-9_-]/g, '_')
+        : savedPhone;
+      this.activeAuthDir = path.join(BASE_AUTH_DIR, `user_${userFolder}`);
       const credPath = path.join(this.activeAuthDir, 'creds.json');
       if (fs.existsSync(credPath)) {
         try {
           const raw = JSON.parse(fs.readFileSync(credPath, 'utf8'));
           if (raw && raw.registered) {
-            console.log(`[WhatsApp] Auto-reconnecting authenticated session for saved phone: ${savedPhone}`);
-            this.connect(savedPhone);
+            console.log(`[WhatsApp] Auto-reconnecting authenticated session for user: ${this.currentActiveUserEmail} (phone: ${savedPhone})`);
+            this.connect(savedPhone, this.currentActiveUserEmail);
           }
         } catch (e) {}
       }
     }
   }
 
-  getStatus(): WhatsAppStatus {
+  getStatus(userEmail?: string): WhatsAppStatus {
+    const effectiveEmail = userEmail || this.currentActiveUserEmail;
     return {
       status: this.status,
       qrCode: this.currentQrCode,
       pairingCode: this.currentPairingCode,
       pairingMode: this.pairingMode,
-      savedPhone: db.getSavedWhatsAppPhone() || this.userPhone || null,
+      savedPhone: db.getSavedWhatsAppPhone(effectiveEmail) || this.userPhone || null,
       user: this.status === 'connected' ? {
         phone: this.userPhone || 'WhatsApp User',
         name: this.userName || 'You',
       } : null,
-      messageCount: db.getWhatsAppMessages().length,
+      messageCount: db.getWhatsAppMessages(effectiveEmail).length,
       targetPhone: this.userPhone,
     };
   }
@@ -113,7 +122,7 @@ export class WhatsAppService {
             userPhone: this.userPhone || undefined,
           };
 
-          db.addWhatsAppMessage(storedMsg);
+          db.addWhatsAppMessage(this.currentActiveUserEmail, storedMsg);
           importedCount++;
 
           if (!fromMe) {
@@ -125,8 +134,8 @@ export class WhatsAppService {
         }
       }
 
-      console.log(`[WhatsApp] Successfully synced and stored ${importedCount} existing messages for user ${this.userPhone}`);
-      db.addNotification({
+      console.log(`[WhatsApp] Successfully synced and stored ${importedCount} existing messages for user ${this.currentActiveUserEmail} (${this.userPhone})`);
+      db.addNotification(this.currentActiveUserEmail, {
         title: 'WhatsApp Existing Chats Synced',
         message: `Synced ${importedCount} existing chats and actively extracted pending action items for your daily priorities.`,
         type: 'success',
@@ -168,7 +177,7 @@ export class WhatsAppService {
             userPhone: this.userPhone || undefined,
           };
 
-          db.addWhatsAppMessage(storedMsg);
+          db.addWhatsAppMessage(this.currentActiveUserEmail, storedMsg);
 
           if (!fromMe) {
             this.detectAndAddTaskFromMessage(storedMsg);
@@ -180,18 +189,24 @@ export class WhatsAppService {
     });
   }
 
-  async connect(phoneNumber?: string): Promise<void> {
+  async connect(phoneNumber?: string, userEmail?: string): Promise<void> {
+    if (userEmail) {
+      this.currentActiveUserEmail = userEmail;
+    }
     if (this.status === 'connected') {
       return;
     }
 
-    const targetPhone = phoneNumber || db.getSavedWhatsAppPhone() || this.userPhone;
+    const targetPhone = phoneNumber || db.getSavedWhatsAppPhone(this.currentActiveUserEmail) || this.userPhone;
     if (targetPhone) {
       let clean = targetPhone.replace(/[^0-9]/g, '');
       if (clean.length === 10) clean = `91${clean}`;
       this.userPhone = clean;
-      db.saveWhatsAppPhone(clean);
-      this.activeAuthDir = path.join(BASE_AUTH_DIR, `user_${clean}`);
+      db.saveWhatsAppPhone(this.currentActiveUserEmail, clean);
+      const userFolder = this.currentActiveUserEmail !== 'default' && this.currentActiveUserEmail !== 'guest'
+        ? this.currentActiveUserEmail.replace(/[^a-zA-Z0-9_-]/g, '_')
+        : clean;
+      this.activeAuthDir = path.join(BASE_AUTH_DIR, `user_${userFolder}`);
     }
 
     this.pairingMode = 'qr';
@@ -267,13 +282,13 @@ export class WhatsAppService {
           // Guarantee user isolation: wipe messages ONLY if switching to a different account!
           if (this.userPhone && this.userPhone !== currentPhone) {
             console.log(`[WhatsApp] Account changed from ${this.userPhone} to ${currentPhone}. Clearing previous messages.`);
-            db.clearWhatsAppMessages();
+            db.clearWhatsAppMessages(this.currentActiveUserEmail);
           }
           this.userPhone = currentPhone;
 
-          db.toggleConnector('whatsapp', true);
+          db.toggleConnector(this.currentActiveUserEmail, 'whatsapp', true);
 
-          db.addNotification({
+          db.addNotification(this.currentActiveUserEmail, {
             title: 'WhatsApp Connected',
             message: `Linked to +${this.userPhone}. All messages and priorities are actively syncing.`,
             type: 'success',
@@ -343,7 +358,10 @@ export class WhatsAppService {
     }
   }
 
-  async requestPairingCode(phoneNumber: string): Promise<string> {
+  async requestPairingCode(phoneNumber: string, userEmail?: string): Promise<string> {
+    if (userEmail) {
+      this.currentActiveUserEmail = userEmail;
+    }
     let cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
 
     // Auto-normalize 10-digit mobile numbers
@@ -359,8 +377,11 @@ export class WhatsAppService {
 
     this.pairingMode = 'code';
     this.userPhone = cleanNumber;
-    db.saveWhatsAppPhone(cleanNumber);
-    this.activeAuthDir = path.join(BASE_AUTH_DIR, `user_${cleanNumber}`);
+    db.saveWhatsAppPhone(this.currentActiveUserEmail, cleanNumber);
+    const userFolder = this.currentActiveUserEmail !== 'default' && this.currentActiveUserEmail !== 'guest'
+      ? this.currentActiveUserEmail.replace(/[^a-zA-Z0-9_-]/g, '_')
+      : cleanNumber;
+    this.activeAuthDir = path.join(BASE_AUTH_DIR, `user_${userFolder}`);
 
     if (this.sock) {
       try {
@@ -443,9 +464,9 @@ export class WhatsAppService {
         this.userPhone = userJid.split(':')[0] || userJid.split('@')[0];
         this.userName = this.sock?.user?.name || 'WhatsApp User';
 
-        db.toggleConnector('whatsapp', true);
+        db.toggleConnector(this.currentActiveUserEmail, 'whatsapp', true);
 
-        db.addNotification({
+        db.addNotification(this.currentActiveUserEmail, {
           title: 'WhatsApp Connected',
           message: `Linked to +${this.userPhone}. All messages and clerical tasks are actively syncing.`,
           type: 'success',
@@ -539,7 +560,7 @@ If NO, respond ONLY with:
 
       const parsed = JSON.parse(res.text || '{}');
       if (parsed.hasTask && parsed.title) {
-        db.addTask({
+        db.addTask(this.currentActiveUserEmail, {
           title: `[WhatsApp: ${msg.fromName}] ${parsed.title}`,
           deadline: parsed.deadline || undefined,
           urgency: parsed.urgency || 'medium',
@@ -547,7 +568,7 @@ If NO, respond ONLY with:
           sender: msg.fromName,
           completed: false,
         });
-        console.log(`[WhatsApp] Action item detected and added to tasks: "${parsed.title}"`);
+        console.log(`[WhatsApp] Action item detected and added to tasks for ${this.currentActiveUserEmail}: "${parsed.title}"`);
       }
     } catch (err) {
       // Non-blocking
@@ -555,8 +576,9 @@ If NO, respond ONLY with:
   }
 
   // Synthesize WhatsApp updates into simple layman spoken briefing
-  async getUpdatesSummary(): Promise<string> {
-    const messages = db.getWhatsAppMessages().slice(0, 20);
+  async getUpdatesSummary(userEmail?: string): Promise<string> {
+    const effectiveEmail = userEmail || this.currentActiveUserEmail;
+    const messages = db.getWhatsAppMessages(effectiveEmail).slice(0, 20);
     if (messages.length === 0) {
       if (this.status !== 'connected') {
         return "Your WhatsApp isn't linked yet. You can enter your 8-digit code or scan the QR code to connect!";
@@ -601,7 +623,8 @@ ${JSON.stringify(messages.map((m) => ({ from: m.fromName, text: m.text, time: m.
     return { success: true, messageId: res?.key.id || undefined };
   }
 
-  disconnect() {
+  disconnect(userEmail?: string) {
+    const effectiveEmail = userEmail || this.currentActiveUserEmail;
     if (this.sock) {
       try {
         this.sock.logout();
@@ -616,7 +639,7 @@ ${JSON.stringify(messages.map((m) => ({ from: m.fromName, text: m.text, time: m.
     this.currentPairingCode = null;
     this.pairingMode = null;
     this.clearAuth();
-    db.toggleConnector('whatsapp', false);
+    db.toggleConnector(effectiveEmail, 'whatsapp', false);
   }
 
   private clearAuth() {
