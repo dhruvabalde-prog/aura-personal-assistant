@@ -196,7 +196,8 @@ export class WhatsAppService {
   }
 
   async connect(phoneNumber?: string, userEmail?: string): Promise<void> {
-    const norm = db.normalizeEmail(userEmail);
+    const emailToUse = userEmail || (this.currentActiveUserEmail !== 'guest' ? this.currentActiveUserEmail : undefined);
+    const norm = db.normalizeEmail(emailToUse);
     if (!norm || norm === 'guest') {
       throw new Error('Please connect your Google Workspace account first to link WhatsApp to your profile.');
     }
@@ -328,7 +329,9 @@ export class WhatsAppService {
               saveCreds();
               setTimeout(() => {
                 this.isInitializing = false;
-                this.connect(this.userPhone || undefined);
+                this.connect(this.userPhone || undefined, this.currentActiveUserEmail).catch((e) => {
+                  console.warn('[WhatsApp] Unregistered 401 retry warning:', e.message);
+                });
               }, 1500);
             }
           } else if (statusCode === DisconnectReason.restartRequired || statusCode === 515) {
@@ -336,21 +339,27 @@ export class WhatsAppService {
             console.log('[WhatsApp] Restart required (515). Reconnecting immediately without deleting credentials...');
             setTimeout(() => {
               this.isInitializing = false;
-              this.connect(this.userPhone || undefined);
+              this.connect(this.userPhone || undefined, this.currentActiveUserEmail).catch((e) => {
+                console.warn('[WhatsApp] Reconnect 515 warning:', e.message);
+              });
             }, 1000);
           } else if (this.pairingMode === 'qr' && statusCode === 408) {
             // QR timed out waiting for scan; regenerate fresh QR code cleanly
             console.log('[WhatsApp] QR scan timed out (408). Regenerating fresh QR code...');
             setTimeout(() => {
               this.isInitializing = false;
-              this.connect(this.userPhone || undefined);
+              this.connect(this.userPhone || undefined, this.currentActiveUserEmail).catch((e) => {
+                console.warn('[WhatsApp] QR timeout refresh warning:', e.message);
+              });
             }, 1500);
           } else if (state.creds.registered) {
             // Registered session disconnected; auto-reconnect
             console.log('[WhatsApp] Registered session disconnected. Reconnecting in 3s...');
             setTimeout(() => {
               this.isInitializing = false;
-              this.connect(this.userPhone || undefined);
+              this.connect(this.userPhone || undefined, this.currentActiveUserEmail).catch((e) => {
+                console.warn('[WhatsApp] Registered auto-reconnect warning:', e.message);
+              });
             }, 3000);
           }
         }
@@ -366,7 +375,8 @@ export class WhatsAppService {
   }
 
   async requestPairingCode(phoneNumber: string, userEmail?: string): Promise<string> {
-    const norm = db.normalizeEmail(userEmail);
+    const emailToUse = userEmail || (this.currentActiveUserEmail !== 'guest' ? this.currentActiveUserEmail : undefined);
+    const norm = db.normalizeEmail(emailToUse);
     if (!norm || norm === 'guest') {
       throw new Error('Please connect your Google Workspace account first to link WhatsApp to your profile.');
     }
@@ -488,12 +498,16 @@ export class WhatsAppService {
         if (statusCode === 515 || statusCode === DisconnectReason.restartRequired) {
           console.log('[WhatsApp] 515 on pairing. Reconnecting immediately...');
           setTimeout(() => {
-            this.requestPairingCode(cleanNumber).catch(() => {});
+            this.requestPairingCode(cleanNumber, this.currentActiveUserEmail).catch((e) => {
+              console.warn('[WhatsApp] Pairing 515 retry warning:', e.message);
+            });
           }, 1000);
         } else if (state.creds.registered) {
           this.status = 'disconnected';
           setTimeout(() => {
-            this.connect(this.userPhone || undefined);
+            this.connect(this.userPhone || undefined, this.currentActiveUserEmail).catch((e) => {
+              console.warn('[WhatsApp] Pairing registered auto-reconnect warning:', e.message);
+            });
           }, 3000);
         } else {
           this.status = 'disconnected';
