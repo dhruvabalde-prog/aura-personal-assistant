@@ -67,10 +67,17 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isRateLimited, setIsRateLimited] = useState(false);
 
+  const getApiUrl = (endpoint: string) => {
+    if (window.location.hostname.includes('vercel.app')) {
+      return `https://commitment-prerequisite-cage-snowboard.trycloudflare.com${endpoint}`;
+    }
+    return endpoint;
+  };
+
   // Load saved phone on open
   useEffect(() => {
     if (isOpen) {
-      fetch('/api/whatsapp/saved-phone', {
+      fetch(getApiUrl('/api/whatsapp/saved-phone'), {
         headers: { 'x-user-email': userEmail || '' },
       })
         .then((r) => r.json())
@@ -81,10 +88,14 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
             setPhoneNumber(clean);
             setIsEditingPhone(false);
           } else {
+            setSavedPhone(null);
+            setPhoneNumber('');
             setIsEditingPhone(true);
           }
         })
         .catch(() => {
+          setSavedPhone(null);
+          setPhoneNumber('');
           setIsEditingPhone(true);
         });
     }
@@ -131,7 +142,7 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
     setErrorMessage(null);
     setIsSavingPhone(true);
     try {
-      const res = await fetch('/api/whatsapp/saved-phone', {
+      const res = await fetch(getApiUrl('/api/whatsapp/saved-phone'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -417,7 +428,7 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
                       maxLength={10}
                       value={phoneNumber}
                       onChange={(e) => setPhoneNumber(e.target.value.replace(/[^0-9]/g, ''))}
-                      placeholder="e.g. 7615846526"
+                      placeholder="Enter 10-digit mobile number"
                       className="flex-1 bg-transparent px-3 py-2 text-xs font-mono text-white placeholder-slate-500 focus:outline-none"
                     />
                   </div>
@@ -480,6 +491,9 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
                   onClick={() => {
                     setTab('qr');
                     setErrorMessage(null);
+                    if (!status?.qrCode) {
+                      handleStartQR();
+                    }
                   }}
                   className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                     tab === 'qr'

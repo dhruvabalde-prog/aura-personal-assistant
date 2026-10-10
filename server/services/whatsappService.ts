@@ -203,11 +203,12 @@ export class WhatsAppService {
       if (clean.length === 10) clean = `91${clean}`;
       this.userPhone = clean;
       db.saveWhatsAppPhone(this.currentActiveUserEmail, clean);
-      const userFolder = this.currentActiveUserEmail !== 'default' && this.currentActiveUserEmail !== 'guest'
-        ? this.currentActiveUserEmail.replace(/[^a-zA-Z0-9_-]/g, '_')
-        : clean;
-      this.activeAuthDir = path.join(BASE_AUTH_DIR, `user_${userFolder}`);
     }
+
+    const userFolder = this.currentActiveUserEmail !== 'default' && this.currentActiveUserEmail !== 'guest'
+      ? this.currentActiveUserEmail.replace(/[^a-zA-Z0-9_-]/g, '_')
+      : (this.userPhone || 'default_session');
+    this.activeAuthDir = path.join(BASE_AUTH_DIR, `user_${userFolder}`);
 
     this.pairingMode = 'qr';
     this.isInitializing = true;
@@ -417,7 +418,7 @@ export class WhatsAppService {
       auth: state,
       logger,
       printQRInTerminal: false,
-      browser: Browsers.macOS('Desktop'),
+      browser: Browsers.ubuntu('Chrome'),
       generateHighQualityLinkPreview: true,
       syncFullHistory: false,
       connectTimeoutMs: 60000,
