@@ -54,10 +54,11 @@ export class GoogleAuthService {
     // Main redirect URI is the production Vercel URI
     const effectiveRedirectUri = REDIRECT_URI;
 
-    const tokens = db.getGoogleTokens(userEmail);
+    const isAuth = this.isAuthenticated(userEmail);
+    const tokens = isAuth ? db.getGoogleTokens(userEmail) : null;
     return {
-      connected: this.isAuthenticated(userEmail),
-      userEmail: tokens?.userEmail || (userEmail && userEmail !== 'guest' ? userEmail : null),
+      connected: isAuth,
+      userEmail: isAuth ? (tokens?.userEmail || (userEmail && userEmail !== 'guest' ? userEmail : null)) : null,
       redirectUri: effectiveRedirectUri,
       origins: [
         'https://aura-personal-ai-tau.vercel.app',

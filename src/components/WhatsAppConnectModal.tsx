@@ -267,7 +267,7 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
             <div>
               <h3 className="text-base font-semibold text-white">Connect WhatsApp</h3>
               <p className="text-xs text-slate-400">
-                {userEmail ? `Workspace: ${userEmail}` : 'Private Multi-Device Session'}
+                {isGoogleConnected && userEmail ? `Workspace: ${userEmail}` : 'Private Multi-Device Session'}
               </p>
             </div>
           </div>

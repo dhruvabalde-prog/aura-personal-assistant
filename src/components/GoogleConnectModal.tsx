@@ -70,7 +70,7 @@ export const GoogleConnectModal: React.FC<GoogleConnectModalProps> = ({
                   {oauthDetails?.connected ? 'Connected & Authorized' : 'Ready to Connect'}
                 </p>
                 <p className="text-xs text-slate-400">
-                  {oauthDetails?.userEmail
+                  {oauthDetails?.connected && oauthDetails?.userEmail
                     ? oauthDetails.userEmail
                     : 'Authorize Aura to manage your clerical tasks'}
                 </p>

@@ -108,6 +108,9 @@ export const App: React.FC = () => {
           localStorage.setItem('aura_user_email', oauthRes.userEmail);
           setCurrentUserEmail(oauthRes.userEmail);
         }
+      } else {
+        localStorage.removeItem('aura_user_email');
+        setCurrentUserEmail(null);
       }
 
       if (Array.isArray(notifRes)) {
@@ -392,13 +395,28 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleDisconnectGoogle = async () => {
-    if (confirm('Disconnect Google Workspace account?')) {
-      await authFetch('/api/auth/google/disconnect', { method: 'POST' });
+  const handleSignOut = async () => {
+    if (confirm('Sign out of Aura and disconnect account?')) {
+      const emailToDisconnect = currentUserEmail;
       localStorage.removeItem('aura_user_email');
+      localStorage.clear();
       setCurrentUserEmail(null);
-      fetchData();
+      setOauthDetails(null);
+      setWhatsappStatus(null);
+      if (emailToDisconnect) {
+        try {
+          await authFetch('/api/auth/google/disconnect', {
+            method: 'POST',
+            headers: { 'x-user-email': emailToDisconnect },
+          });
+        } catch (e) {}
+      }
+      window.location.href = '/';
     }
+  };
+
+  const handleDisconnectGoogle = async () => {
+    await handleSignOut();
   };
 
   const handleConnectWhatsApp = async (phone?: string) => {
@@ -445,10 +463,26 @@ export const App: React.FC = () => {
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           <span className="text-xs font-semibold tracking-wider text-slate-200 uppercase">Aura</span>
-          {(oauthDetails?.userEmail || currentUserEmail) && (
-            <span className="text-[10px] text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded-full border border-indigo-500/20 max-w-[120px] truncate">
-              {oauthDetails?.userEmail || currentUserEmail}
-            </span>
+          {oauthDetails?.connected && (oauthDetails?.userEmail || currentUserEmail) ? (
+            <div className="flex items-center gap-1.5 bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20">
+              <span className="text-[10px] text-indigo-400 max-w-[110px] truncate" title={oauthDetails?.userEmail || currentUserEmail || ''}>
+                {oauthDetails?.userEmail || currentUserEmail}
+              </span>
+              <button
+                onClick={handleSignOut}
+                className="text-[10px] text-rose-400 hover:text-rose-300 ml-0.5 font-medium transition-colors cursor-pointer"
+                title="Sign out of Aura"
+              >
+                Logout
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={handleConnectGoogle}
+              className="text-[10px] text-indigo-300 hover:text-white bg-indigo-600/30 hover:bg-indigo-600/50 px-2 py-0.5 rounded-full border border-indigo-500/30 transition-all flex items-center gap-1 cursor-pointer"
+            >
+              <span>Connect Google</span>
+            </button>
           )}
         </div>
 
