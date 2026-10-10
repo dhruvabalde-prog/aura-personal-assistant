@@ -76,6 +76,13 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
 
   // Load saved phone on open
   useEffect(() => {
+    if (!isGoogleConnected || !userEmail) {
+      setSavedPhone(null);
+      setPhoneNumber('');
+      setIsEditingPhone(true);
+      setLocalPairingCode(null);
+      return;
+    }
     if (isOpen) {
       fetch(getApiUrl('/api/whatsapp/saved-phone'), {
         headers: { 'x-user-email': userEmail || '' },
@@ -99,10 +106,11 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
           setIsEditingPhone(true);
         });
     }
-  }, [isOpen, userEmail]);
+  }, [isOpen, userEmail, isGoogleConnected]);
 
   // Sync savedPhone from status if available
   useEffect(() => {
+    if (!isGoogleConnected || !userEmail) return;
     if (status?.savedPhone && !savedPhone) {
       const clean = status.savedPhone.replace(/^91/, '');
       setSavedPhone(status.savedPhone);
@@ -112,7 +120,7 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
     if (status?.pairingCode) {
       setLocalPairingCode(status.pairingCode);
     }
-  }, [status?.savedPhone, status?.pairingCode, savedPhone]);
+  }, [status?.savedPhone, status?.pairingCode, savedPhone, isGoogleConnected, userEmail]);
 
   // Polling for live status
   useEffect(() => {

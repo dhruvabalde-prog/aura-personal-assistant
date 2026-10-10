@@ -3,7 +3,7 @@ import { db } from '../storage/db.js';
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
-const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'https://localhost:5000/api/auth/google/callback';
+const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'https://aura-personal-ai-tau.vercel.app/api/auth/google/callback';
 
 export const OAUTH_SCOPES = [
   'https://www.googleapis.com/auth/userinfo.profile',
@@ -51,9 +51,8 @@ export class GoogleAuthService {
 
   getOAuthDetails(host?: string, userEmail?: string) {
     const isCloudflare = host && host.includes('trycloudflare.com');
-    const effectiveRedirectUri = isCloudflare
-      ? `https://${host}/api/auth/google/callback`
-      : REDIRECT_URI;
+    // Main redirect URI is the production Vercel URI
+    const effectiveRedirectUri = REDIRECT_URI;
 
     const tokens = db.getGoogleTokens(userEmail);
     return {
@@ -61,6 +60,7 @@ export class GoogleAuthService {
       userEmail: tokens?.userEmail || (userEmail && userEmail !== 'guest' ? userEmail : null),
       redirectUri: effectiveRedirectUri,
       origins: [
+        'https://aura-personal-ai-tau.vercel.app',
         'https://localhost:3000',
         'https://localhost:5000',
         ...(isCloudflare ? [`https://${host}`] : []),

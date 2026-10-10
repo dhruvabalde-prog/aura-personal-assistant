@@ -31,8 +31,8 @@ export const GoogleConnectModal: React.FC<GoogleConnectModalProps> = ({
     setTimeout(() => setCopiedField(null), 2000);
   };
 
-  const redirectUri = oauthDetails?.redirectUri || 'https://localhost:5000/api/auth/google/callback';
-  const origins = oauthDetails?.origins || ['https://localhost:3000', 'https://localhost:5000'];
+  const redirectUri = oauthDetails?.redirectUri || 'https://aura-personal-ai-tau.vercel.app/api/auth/google/callback';
+  const origins = oauthDetails?.origins || ['https://aura-personal-ai-tau.vercel.app', 'https://localhost:3000', 'https://localhost:5000'];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-fade-in select-none">

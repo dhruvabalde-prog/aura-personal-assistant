@@ -239,7 +239,6 @@ class Database {
         } else {
           this.data = {
             users: parsed.users || {},
-            activeUserEmail: parsed.activeUserEmail,
             adminSettings: parsed.adminSettings || defaultAdminSettings,
             customRedirectUri: parsed.customRedirectUri,
           };
@@ -282,23 +281,22 @@ class Database {
   }
 
   public normalizeEmail(email?: string | null): string {
-    if (!email || typeof email !== 'string' || !email.trim() || email === 'undefined' || email === 'null') {
-      return this.data.activeUserEmail ? this.normalizeEmail(this.data.activeUserEmail) : 'guest';
+    if (!email || typeof email !== 'string' || !email.trim() || email === 'undefined' || email === 'null' || email === 'guest') {
+      return 'guest';
     }
     return email.trim().toLowerCase();
   }
 
   public getActiveUserEmail(): string | undefined {
-    return this.data.activeUserEmail;
+    return undefined;
   }
 
   public setActiveUserEmail(email: string) {
     const norm = this.normalizeEmail(email);
-    this.data.activeUserEmail = norm;
-    if (!this.data.users[norm]) {
+    if (norm !== 'guest' && !this.data.users[norm]) {
       this.data.users[norm] = createInitialWorkspace(norm);
+      this.save(norm);
     }
-    this.save(norm);
   }
 
   public getUserWorkspace(email?: string): UserWorkspace {
@@ -415,7 +413,9 @@ class Database {
 
   // --- Google Tokens Methods ---
   getGoogleTokens(email?: string): GoogleTokens | null {
-    return this.getUserWorkspace(email).googleTokens;
+    const norm = this.normalizeEmail(email);
+    if (norm === 'guest') return null;
+    return this.getUserWorkspace(norm).googleTokens;
   }
 
   saveGoogleTokens(arg1?: string | GoogleTokens | null, arg2?: GoogleTokens | null) {
@@ -429,23 +429,24 @@ class Database {
       email = tokens?.userEmail || undefined;
     }
 
-    if (tokens?.userEmail) {
-      this.data.activeUserEmail = this.normalizeEmail(tokens.userEmail);
-    }
+    const norm = this.normalizeEmail(email);
+    if (norm === 'guest') return;
 
-    const ws = this.getUserWorkspace(email);
+    const ws = this.getUserWorkspace(norm);
     ws.googleTokens = tokens;
     if (tokens?.access_token || tokens?.refresh_token) {
       ws.connectors.forEach((c) => {
         if (c.category === 'google_workspace') c.enabled = true;
       });
     }
-    this.save(email);
+    this.save(norm);
   }
 
   // --- WhatsApp Phone & Settings Methods ---
   getSavedWhatsAppPhone(email?: string): string | undefined {
-    return this.getUserWorkspace(email).savedWhatsAppPhone;
+    const norm = this.normalizeEmail(email);
+    if (norm === 'guest') return undefined;
+    return this.getUserWorkspace(norm).savedWhatsAppPhone;
   }
 
   saveWhatsAppPhone(arg1: string, arg2?: string) {
@@ -457,11 +458,13 @@ class Database {
     } else {
       phone = arg1;
     }
-    let clean = phone.replace(/[^0-9]/g, '');
+    const norm = this.normalizeEmail(email);
+    if (norm === 'guest') return;
+    let clean = phone ? phone.replace(/[^0-9]/g, '') : '';
     if (clean.length === 10) clean = `91${clean}`;
-    const ws = this.getUserWorkspace(email);
-    ws.savedWhatsAppPhone = clean;
-    this.save(email);
+    const ws = this.getUserWorkspace(norm);
+    ws.savedWhatsAppPhone = clean || undefined;
+    this.save(norm);
   }
 
   // --- Tasks Methods ---

@@ -47,7 +47,7 @@ function getUserEmail(req: Request): string {
   if (body && typeof body === 'string' && body.trim() && body !== 'null' && body !== 'undefined') {
     return body.trim().toLowerCase();
   }
-  return db.getActiveUserEmail() || 'guest';
+  return 'guest';
 }
 
 // Health check
@@ -184,7 +184,9 @@ app.get('/api/auth/google/details', (req: Request, res: Response) => {
 app.get('/api/auth/google/url', (req: Request, res: Response) => {
   const host = req.headers.host || '';
   const isCloudflare = host.includes('trycloudflare.com');
-  const redirectUri = isCloudflare ? `https://${host}/api/auth/google/callback` : undefined;
+  const redirectUri = isCloudflare
+    ? `https://${host}/api/auth/google/callback`
+    : 'https://aura-personal-ai-tau.vercel.app/api/auth/google/callback';
   const url = googleAuth.getAuthUrl(redirectUri);
   res.json({ url });
 });
@@ -193,8 +195,15 @@ app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
   const code = req.query.code as string;
   const host = req.headers.host || '';
   const isCloudflare = host.includes('trycloudflare.com');
-  const redirectUri = isCloudflare ? `https://${host}/api/auth/google/callback` : undefined;
-  const returnOrigin = isCloudflare ? `https://${host}` : CLIENT_ORIGIN;
+  const isVercel = host.includes('vercel.app');
+  const redirectUri = isCloudflare
+    ? `https://${host}/api/auth/google/callback`
+    : 'https://aura-personal-ai-tau.vercel.app/api/auth/google/callback';
+  const returnOrigin = isVercel
+    ? 'https://aura-personal-ai-tau.vercel.app'
+    : isCloudflare
+    ? `https://${host}`
+    : CLIENT_ORIGIN;
 
   if (!code) {
     res.redirect(`${returnOrigin}/?auth=error&reason=no_code`);
@@ -203,7 +212,6 @@ app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
 
   const result = await googleAuth.handleCallback(code, redirectUri);
   if (result.success && result.email) {
-    db.setActiveUserEmail(result.email);
     try {
       await supabaseService.getOrCreateUserId(result.email);
       await db.hydrateUserFromSupabase(result.email);
@@ -225,11 +233,19 @@ app.post('/api/auth/google/disconnect', (req: Request, res: Response) => {
 // WhatsApp Multi-Device Endpoints
 app.get('/api/whatsapp/saved-phone', (req: Request, res: Response) => {
   const email = getUserEmail(req);
+  if (email === 'guest') {
+    res.json({ phone: null });
+    return;
+  }
   res.json({ phone: db.getSavedWhatsAppPhone(email) || null });
 });
 
 app.post('/api/whatsapp/saved-phone', (req: Request, res: Response) => {
   const email = getUserEmail(req);
+  if (email === 'guest') {
+    res.status(400).json({ error: 'Please sign in with Google first to save your phone number.' });
+    return;
+  }
   const { phone } = req.body || {};
   if (!phone || phone.replace(/[^0-9]/g, '').length < 10) {
     res.status(400).json({ error: 'Please provide a valid 10-digit mobile number' });
@@ -247,6 +263,10 @@ app.get('/api/whatsapp/status', (req: Request, res: Response) => {
 app.post('/api/whatsapp/connect', async (req: Request, res: Response) => {
   try {
     const email = getUserEmail(req);
+    if (email === 'guest') {
+      res.status(400).json({ error: 'Please sign in with Google first before connecting WhatsApp.' });
+      return;
+    }
     const { phoneNumber } = req.body || {};
     await whatsappService.connect(phoneNumber, email);
     res.json({ success: true, status: whatsappService.getStatus(email) });
@@ -257,6 +277,10 @@ app.post('/api/whatsapp/connect', async (req: Request, res: Response) => {
 
 app.post('/api/whatsapp/pairing-code', async (req: Request, res: Response) => {
   const email = getUserEmail(req);
+  if (email === 'guest') {
+    res.status(400).json({ error: 'Please sign in with Google first before requesting a pairing code.' });
+    return;
+  }
   const { phoneNumber } = req.body;
   if (!phoneNumber) {
     res.status(400).json({ error: 'phoneNumber is required (e.g. 15551234567)' });

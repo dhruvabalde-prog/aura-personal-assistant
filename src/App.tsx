@@ -102,9 +102,12 @@ export const App: React.FC = () => {
       setWhatsappStatus(waRes);
       setAdminSettings(adminRes);
 
-      if (oauthRes?.userEmail && !currentUserEmail) {
-        localStorage.setItem('aura_user_email', oauthRes.userEmail);
-        setCurrentUserEmail(oauthRes.userEmail);
+      // Only synchronize oauth user email if the current user explicitly connected Google in this browser
+      if (oauthRes?.connected && oauthRes?.userEmail) {
+        if (!currentUserEmail || currentUserEmail !== oauthRes.userEmail) {
+          localStorage.setItem('aura_user_email', oauthRes.userEmail);
+          setCurrentUserEmail(oauthRes.userEmail);
+        }
       }
 
       if (Array.isArray(notifRes)) {

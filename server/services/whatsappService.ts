@@ -44,45 +44,51 @@ export class WhatsAppService {
   private currentActiveUserEmail: string = 'default';
 
   constructor() {
-    // Check if an active user exists
-    const activeEmail = db.getActiveUserEmail();
-    if (activeEmail) {
-      this.currentActiveUserEmail = activeEmail;
-    }
-    const savedPhone = db.getSavedWhatsAppPhone(this.currentActiveUserEmail);
-    if (savedPhone) {
-      this.userPhone = savedPhone;
-      const userFolder = this.currentActiveUserEmail !== 'default' && this.currentActiveUserEmail !== 'guest'
-        ? this.currentActiveUserEmail.replace(/[^a-zA-Z0-9_-]/g, '_')
-        : savedPhone;
-      this.activeAuthDir = path.join(BASE_AUTH_DIR, `user_${userFolder}`);
-      const credPath = path.join(this.activeAuthDir, 'creds.json');
-      if (fs.existsSync(credPath)) {
-        try {
-          const raw = JSON.parse(fs.readFileSync(credPath, 'utf8'));
-          if (raw && raw.registered) {
-            console.log(`[WhatsApp] Auto-reconnecting authenticated session for user: ${this.currentActiveUserEmail} (phone: ${savedPhone})`);
-            this.connect(savedPhone, this.currentActiveUserEmail);
-          }
-        } catch (e) {}
-      }
-    }
+    // Fresh session - do not auto-bind to unauthenticated callers
   }
 
   getStatus(userEmail?: string): WhatsAppStatus {
-    const effectiveEmail = userEmail || this.currentActiveUserEmail;
+    const norm = db.normalizeEmail(userEmail);
+    if (!norm || norm === 'guest') {
+      return {
+        status: 'disconnected',
+        qrCode: null,
+        pairingCode: null,
+        pairingMode: null,
+        savedPhone: null,
+        user: null,
+        messageCount: 0,
+        targetPhone: null,
+      };
+    }
+
+    // Only if the current live socket belongs to this specific user
+    if (this.currentActiveUserEmail === norm) {
+      return {
+        status: this.status,
+        qrCode: this.currentQrCode,
+        pairingCode: this.currentPairingCode,
+        pairingMode: this.pairingMode,
+        savedPhone: db.getSavedWhatsAppPhone(norm) || this.userPhone || null,
+        user: this.status === 'connected' ? {
+          phone: this.userPhone || 'WhatsApp User',
+          name: this.userName || 'You',
+        } : null,
+        messageCount: db.getWhatsAppMessages(norm).length,
+        targetPhone: this.userPhone,
+      };
+    }
+
+    // Otherwise, this user is not the active socket session
     return {
-      status: this.status,
-      qrCode: this.currentQrCode,
-      pairingCode: this.currentPairingCode,
-      pairingMode: this.pairingMode,
-      savedPhone: db.getSavedWhatsAppPhone(effectiveEmail) || this.userPhone || null,
-      user: this.status === 'connected' ? {
-        phone: this.userPhone || 'WhatsApp User',
-        name: this.userName || 'You',
-      } : null,
-      messageCount: db.getWhatsAppMessages(effectiveEmail).length,
-      targetPhone: this.userPhone,
+      status: 'disconnected',
+      qrCode: null,
+      pairingCode: null,
+      pairingMode: null,
+      savedPhone: db.getSavedWhatsAppPhone(norm) || null,
+      user: null,
+      messageCount: db.getWhatsAppMessages(norm).length,
+      targetPhone: null,
     };
   }
 
@@ -190,24 +196,24 @@ export class WhatsAppService {
   }
 
   async connect(phoneNumber?: string, userEmail?: string): Promise<void> {
-    if (userEmail) {
-      this.currentActiveUserEmail = userEmail;
+    const norm = db.normalizeEmail(userEmail);
+    if (!norm || norm === 'guest') {
+      throw new Error('Please connect your Google Workspace account first to link WhatsApp to your profile.');
     }
-    if (this.status === 'connected') {
+    this.currentActiveUserEmail = norm;
+    if (this.status === 'connected' && this.currentActiveUserEmail === norm) {
       return;
     }
 
-    const targetPhone = phoneNumber || db.getSavedWhatsAppPhone(this.currentActiveUserEmail) || this.userPhone;
+    const targetPhone = phoneNumber || db.getSavedWhatsAppPhone(norm);
     if (targetPhone) {
       let clean = targetPhone.replace(/[^0-9]/g, '');
       if (clean.length === 10) clean = `91${clean}`;
       this.userPhone = clean;
-      db.saveWhatsAppPhone(this.currentActiveUserEmail, clean);
+      db.saveWhatsAppPhone(norm, clean);
     }
 
-    const userFolder = this.currentActiveUserEmail !== 'default' && this.currentActiveUserEmail !== 'guest'
-      ? this.currentActiveUserEmail.replace(/[^a-zA-Z0-9_-]/g, '_')
-      : (this.userPhone || 'default_session');
+    const userFolder = norm.replace(/[^a-zA-Z0-9_-]/g, '_');
     this.activeAuthDir = path.join(BASE_AUTH_DIR, `user_${userFolder}`);
 
     this.pairingMode = 'qr';
@@ -360,9 +366,12 @@ export class WhatsAppService {
   }
 
   async requestPairingCode(phoneNumber: string, userEmail?: string): Promise<string> {
-    if (userEmail) {
-      this.currentActiveUserEmail = userEmail;
+    const norm = db.normalizeEmail(userEmail);
+    if (!norm || norm === 'guest') {
+      throw new Error('Please connect your Google Workspace account first to link WhatsApp to your profile.');
     }
+    this.currentActiveUserEmail = norm;
+
     let cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
 
     // Auto-normalize 10-digit mobile numbers
@@ -378,10 +387,8 @@ export class WhatsAppService {
 
     this.pairingMode = 'code';
     this.userPhone = cleanNumber;
-    db.saveWhatsAppPhone(this.currentActiveUserEmail, cleanNumber);
-    const userFolder = this.currentActiveUserEmail !== 'default' && this.currentActiveUserEmail !== 'guest'
-      ? this.currentActiveUserEmail.replace(/[^a-zA-Z0-9_-]/g, '_')
-      : cleanNumber;
+    db.saveWhatsAppPhone(norm, cleanNumber);
+    const userFolder = norm.replace(/[^a-zA-Z0-9_-]/g, '_');
     this.activeAuthDir = path.join(BASE_AUTH_DIR, `user_${userFolder}`);
 
     if (this.sock) {
@@ -625,7 +632,7 @@ ${JSON.stringify(messages.map((m) => ({ from: m.fromName, text: m.text, time: m.
   }
 
   disconnect(userEmail?: string) {
-    const effectiveEmail = userEmail || this.currentActiveUserEmail;
+    const norm = db.normalizeEmail(userEmail);
     if (this.sock) {
       try {
         this.sock.logout();
@@ -639,8 +646,14 @@ ${JSON.stringify(messages.map((m) => ({ from: m.fromName, text: m.text, time: m.
     this.currentQrCode = null;
     this.currentPairingCode = null;
     this.pairingMode = null;
+    this.userPhone = null;
+    this.userName = null;
     this.clearAuth();
-    db.toggleConnector(effectiveEmail, 'whatsapp', false);
+    if (norm && norm !== 'guest') {
+      db.saveWhatsAppPhone(norm, '');
+      db.toggleConnector(norm, 'whatsapp', false);
+    }
+    this.currentActiveUserEmail = 'guest';
   }
 
   private clearAuth() {
