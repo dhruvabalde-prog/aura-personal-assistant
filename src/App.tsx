@@ -120,13 +120,8 @@ export const App: React.FC = () => {
       setAdminSettings(adminRes);
 
       if (oauthRes?.connected && oauthRes?.userEmail) {
-        if (!currentUserEmail || currentUserEmail !== oauthRes.userEmail) {
-          localStorage.setItem('aura_user_email', oauthRes.userEmail);
-          setCurrentUserEmail(oauthRes.userEmail);
-        }
-      } else {
-        localStorage.removeItem('aura_user_email');
-        setCurrentUserEmail(null);
+        localStorage.setItem('aura_user_email', oauthRes.userEmail);
+        setCurrentUserEmail(oauthRes.userEmail);
       }
 
       if (Array.isArray(notifRes)) {
@@ -149,6 +144,17 @@ export const App: React.FC = () => {
   };
 
   useEffect(() => {
+    // Check if redirected from Google OAuth with auth=success&email=...
+    const urlParams = new URLSearchParams(window.location.search);
+    const authStatus = urlParams.get('auth');
+    const authEmail = urlParams.get('email');
+    if (authStatus === 'success' && authEmail) {
+      localStorage.setItem('aura_user_email', decodeURIComponent(authEmail));
+      setCurrentUserEmail(decodeURIComponent(authEmail));
+      // Clean query parameters from URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
     fetchData();
 
     // Catch PWA beforeinstallprompt event

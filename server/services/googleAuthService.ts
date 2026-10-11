@@ -28,8 +28,21 @@ export class GoogleAuthService {
     const isCloudflare = host && host.includes('trycloudflare.com');
     const effectiveRedirectUri = REDIRECT_URI;
 
-    const isAuth = this.isAuthenticated(userEmail);
-    const tokens = isAuth ? db.getGoogleTokens(userEmail) : null;
+    let isAuth = this.isAuthenticated(userEmail);
+    let tokens = isAuth ? db.getGoogleTokens(userEmail) : null;
+
+    // If no email was specified in the request, inspect if any registered user has Google connected
+    if (!isAuth) {
+      const allUsers = Object.keys((db as any).data.users || {});
+      for (const u of allUsers) {
+        if (u !== 'guest' && this.isAuthenticated(u)) {
+          isAuth = true;
+          tokens = db.getGoogleTokens(u);
+          break;
+        }
+      }
+    }
+
     return {
       connected: isAuth,
       userEmail: isAuth ? (tokens?.userEmail || (userEmail && userEmail !== 'guest' ? userEmail : null)) : null,
