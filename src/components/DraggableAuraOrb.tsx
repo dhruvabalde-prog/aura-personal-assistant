@@ -62,7 +62,7 @@ export const DraggableAuraOrb: React.FC<DraggableAuraOrbProps> = ({
     const dx = touch.clientX - dragStartRef.current.x;
     const dy = touch.clientY - dragStartRef.current.y;
 
-    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+    if (Math.abs(dx) > 12 || Math.abs(dy) > 12) {
       hasMovedRef.current = true;
     }
 
@@ -74,6 +74,9 @@ export const DraggableAuraOrb: React.FC<DraggableAuraOrbProps> = ({
 
   const handleTouchEnd = () => {
     isDraggingRef.current = false;
+    if (!hasMovedRef.current) {
+      onToggleRecording();
+    }
   };
 
   // Mouse event handlers for desktop
@@ -92,7 +95,7 @@ export const DraggableAuraOrb: React.FC<DraggableAuraOrbProps> = ({
       const dx = moveEvent.clientX - dragStartRef.current.x;
       const dy = moveEvent.clientY - dragStartRef.current.y;
 
-      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+      if (Math.abs(dx) > 12 || Math.abs(dy) > 12) {
         hasMovedRef.current = true;
       }
 
@@ -113,12 +116,10 @@ export const DraggableAuraOrb: React.FC<DraggableAuraOrbProps> = ({
   };
 
   const handleClick = (e: React.MouseEvent) => {
-    // If the user was dragging, don't trigger the click action
     if (hasMovedRef.current) {
       e.stopPropagation();
       return;
     }
-    // Single tap toggles recording or opens voice
     onToggleRecording();
   };
 

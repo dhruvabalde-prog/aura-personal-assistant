@@ -35,13 +35,26 @@ export const App: React.FC = () => {
   const [voiceGender, setVoiceGender] = useState<'female' | 'male'>('female');
   const [transcript, setTranscript] = useState<{ user?: string; assistant?: string }>({});
 
-  // Chat sessions & history
-  const [sessions, setSessions] = useState<ChatSessionMeta[]>([
-    { id: 'sess-1', title: 'Aura Assistant', updatedAt: new Date().toISOString() },
-  ]);
-  const [activeSessionId, setActiveSessionId] = useState('sess-1');
+  // Chat sessions & history (persisted in localStorage)
+  const [sessions, setSessions] = useState<ChatSessionMeta[]>(() => {
+    try {
+      const saved = localStorage.getItem('aura_chat_sessions');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return [{ id: 'sess-1', title: 'Aura Assistant', updatedAt: new Date().toISOString() }];
+  });
+  const [activeSessionId, setActiveSessionId] = useState<string>(() => {
+    return localStorage.getItem('aura_active_session_id') || 'sess-1';
+  });
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [isChatLoading, setIsChatLoading] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('aura_chat_sessions', JSON.stringify(sessions));
+      localStorage.setItem('aura_active_session_id', activeSessionId);
+    } catch (e) {}
+  }, [sessions, activeSessionId]);
 
   // Tasks & Clerical Data
   const [tasks, setTasks] = useState<TaskItem[]>([]);
@@ -84,9 +97,11 @@ export const App: React.FC = () => {
     if (email) {
       headers.set('x-user-email', email);
     }
+    // Respect custom backend URL if set in localStorage (e.g. for tunneled dev), otherwise relative
+    const customBackend = localStorage.getItem('aura_backend_url');
     let targetUrl = url;
-    if (url.startsWith('/api') && window.location.hostname.includes('vercel.app')) {
-      targetUrl = `https://implementing-prairie-realtor-farm.trycloudflare.com${url}`;
+    if (customBackend && url.startsWith('/api')) {
+      targetUrl = `${customBackend.replace(/\/$/, '')}${url}`;
     }
     return fetch(targetUrl, { ...options, headers });
   };
@@ -195,15 +210,25 @@ export const App: React.FC = () => {
       return wsRef.current;
     }
 
-    const isVercel = window.location.hostname.includes('vercel.app');
-    const wsHost = isVercel ? 'implementing-prairie-realtor-farm.trycloudflare.com' : window.location.host;
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const customBackend = localStorage.getItem('aura_backend_url');
+    let wsHost = window.location.host;
+    let protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+
+    if (customBackend) {
+      try {
+        const parsed = new URL(customBackend);
+        wsHost = parsed.host;
+        protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+      } catch (e) {}
+    }
+
     const wsUrl = `${protocol}//${wsHost}/ws/live`;
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
       console.log('[Live WS] Connected to backend');
-      ws.send(JSON.stringify({ type: 'start', voice: voiceGender }));
+      const email = currentUserEmail || localStorage.getItem('aura_user_email') || 'guest';
+      ws.send(JSON.stringify({ type: 'start', voice: voiceGender, userEmail: email }));
     };
 
     ws.onmessage = (event) => {
@@ -607,14 +632,8 @@ export const App: React.FC = () => {
             googleConnected={!!oauthDetails?.connected}
             onOpenGoogleModal={() => setIsGoogleModalOpen(true)}
             currentUserEmail={currentUserEmail}
-          />
-        )}
-
-        {activeTab === 'dashboards' && (
-          <DashboardsView
             tasksCount={tasks.filter((t) => !t.completed).length}
             completedTasksCount={tasks.filter((t) => t.completed).length}
-            whatsappMessageCount={whatsappStatus?.messageCount || 0}
           />
         )}
       </main>

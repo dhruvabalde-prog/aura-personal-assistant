@@ -5,8 +5,10 @@ import {
   Users,
   Shield,
   Search,
+  BarChart3,
 } from 'lucide-react';
 import { WhatsAppStatusData } from '../components/WhatsAppConnectModal';
+import { DashboardsView } from './DashboardsView';
 
 interface CommsViewProps {
   whatsappStatus: WhatsAppStatusData | null;
@@ -14,6 +16,8 @@ interface CommsViewProps {
   googleConnected: boolean;
   onOpenGoogleModal: () => void;
   currentUserEmail: string | null;
+  tasksCount?: number;
+  completedTasksCount?: number;
 }
 
 export const CommsView: React.FC<CommsViewProps> = ({
@@ -22,9 +26,30 @@ export const CommsView: React.FC<CommsViewProps> = ({
   googleConnected,
   onOpenGoogleModal,
   currentUserEmail,
+  tasksCount = 0,
+  completedTasksCount = 0,
 }) => {
-  const [subTab, setSubTab] = useState<'channels' | 'contacts'>('channels');
+  const [subTab, setSubTab] = useState<'channels' | 'contacts' | 'metrics'>('channels');
   const [contactsSearch, setContactsSearch] = useState('');
+  const [contactsList, setContactsList] = useState<Array<{ name: string; phoneNumbers: string[]; emails: string[]; organization?: string }>>([]);
+
+  React.useEffect(() => {
+    const email = currentUserEmail || localStorage.getItem('aura_user_email');
+    const customBackend = localStorage.getItem('aura_backend_url');
+    const targetUrl = customBackend ? `${customBackend.replace(/\/$/, '')}/api/google/contacts` : '/api/google/contacts';
+    fetch(targetUrl, {
+      headers: email ? { 'x-user-email': email } : {},
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setContactsList(data);
+        }
+      })
+      .catch((err) => {
+        console.warn('[CommsView] Contacts fetch note:', err);
+      });
+  }, [currentUserEmail, googleConnected]);
 
   return (
     <div className="flex flex-col h-[calc(100vh-7.5rem)] max-w-md mx-auto select-none">
@@ -33,7 +58,7 @@ export const CommsView: React.FC<CommsViewProps> = ({
         <div className="flex items-center bg-slate-900 border border-slate-800 p-1 rounded-2xl shadow-inner">
           <button
             onClick={() => setSubTab('channels')}
-            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
               subTab === 'channels'
                 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                 : 'text-slate-400 hover:text-slate-200'
@@ -44,7 +69,7 @@ export const CommsView: React.FC<CommsViewProps> = ({
           </button>
           <button
             onClick={() => setSubTab('contacts')}
-            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
               subTab === 'contacts'
                 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                 : 'text-slate-400 hover:text-slate-200'
@@ -52,6 +77,17 @@ export const CommsView: React.FC<CommsViewProps> = ({
           >
             <Users className="w-3.5 h-3.5" />
             <span>Contacts</span>
+          </button>
+          <button
+            onClick={() => setSubTab('metrics')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+              subTab === 'metrics'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            <span>Metrics</span>
           </button>
         </div>
       </div>
@@ -160,15 +196,61 @@ export const CommsView: React.FC<CommsViewProps> = ({
               />
             </div>
 
-            <div className="p-6 rounded-3xl bg-slate-900/60 border border-slate-800 text-center space-y-2">
-              <Users className="w-8 h-8 text-indigo-400 mx-auto" />
-              <h4 className="text-xs font-bold text-slate-200">Contacts Auto-Synced</h4>
-              <p className="text-[11px] text-slate-400">
-                {googleConnected
-                  ? 'Active contact resolution is enabled for your linked Google Account.'
-                  : 'Connect Google Workspace to auto-resolve contacts and sender names.'}
-              </p>
-            </div>
+            {contactsList.length === 0 ? (
+              <div className="p-6 rounded-3xl bg-slate-900/60 border border-slate-800 text-center space-y-2">
+                <Users className="w-8 h-8 text-indigo-400 mx-auto" />
+                <h4 className="text-xs font-bold text-slate-200">
+                  {googleConnected ? 'No Contacts Found' : 'Connect Google Workspace'}
+                </h4>
+                <p className="text-[11px] text-slate-400">
+                  {googleConnected
+                    ? 'Sync contacts in settings or check your connected Google account.'
+                    : 'Connect Google Workspace to auto-resolve contacts and sender names.'}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-80 overflow-y-auto no-scrollbar">
+                {contactsList
+                  .filter((c) => {
+                    const q = contactsSearch.toLowerCase();
+                    return (
+                      !q ||
+                      c.name.toLowerCase().includes(q) ||
+                      c.phoneNumbers.some((p: string) => p.includes(q)) ||
+                      c.emails.some((e: string) => e.toLowerCase().includes(q))
+                    );
+                  })
+                  .map((c, idx) => (
+                    <div
+                      key={idx}
+                      className="p-3 rounded-2xl bg-slate-900/70 border border-slate-800 flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-white truncate">{c.name}</p>
+                        <p className="text-[10px] text-slate-400 font-mono truncate">
+                          {c.phoneNumbers[0] ? `+${c.phoneNumbers[0]}` : c.emails[0] || 'No phone/email'}
+                        </p>
+                      </div>
+                      {c.organization && (
+                        <span className="text-[9px] px-2 py-0.5 rounded-full bg-slate-800 text-indigo-300 shrink-0">
+                          {c.organization}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* SUBTAB 3: METRICS & TRACKERS */}
+        {subTab === 'metrics' && (
+          <div className="h-full">
+            <DashboardsView
+              tasksCount={tasksCount}
+              completedTasksCount={completedTasksCount}
+              whatsappMessageCount={whatsappStatus?.messageCount || 0}
+            />
           </div>
         )}
       </div>

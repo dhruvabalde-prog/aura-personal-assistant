@@ -9,6 +9,7 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 export interface LiveSessionOptions {
   voice: 'female' | 'male';
   voiceName?: string;
+  userEmail?: string;
   onAudioChunk: (base64Audio: string) => void;
   onTranscription: (role: 'user' | 'assistant', text: string) => void;
   onInterrupted: () => void;
@@ -29,7 +30,8 @@ export class GeminiLiveService {
   }
 
   async createLiveSession(options: LiveSessionOptions) {
-    const profile = db.getProfile();
+    const norm = db.normalizeEmail(options.userEmail);
+    const profile = db.getProfile(norm);
     const voiceName = this.getVoiceName(options.voice, options.voiceName);
 
     const systemInstructionText = `
@@ -50,7 +52,7 @@ Current User Context:
 When speaking, be conversational, direct, and action-oriented.
 `;
 
-    const allRegistered = pluginRegistry.getAllTools();
+    const allRegistered = pluginRegistry.getAllTools(norm);
     const toolDeclarations = allRegistered.map(({ tool }) => ({
       name: tool.name,
       description: tool.description,
@@ -82,7 +84,7 @@ When speaking, be conversational, direct, and action-oriented.
         },
         callbacks: {
           onopen: () => {
-            console.log(`[Gemini Live] Session opened with voice: ${voiceName}`);
+            console.log(`[Gemini Live] Session opened with voice: ${voiceName} for user: ${norm}`);
           },
           onmessage: async (msg: any) => {
             const serverContent = msg?.serverContent;
@@ -91,9 +93,9 @@ When speaking, be conversational, direct, and action-oriented.
             if (msg?.toolCall?.functionCalls) {
               const functionResponses: any[] = [];
               for (const call of msg.toolCall.functionCalls) {
-                console.log(`[Gemini Live] Tool call: ${call.name}`, call.args);
+                console.log(`[Gemini Live] Tool call: ${call.name} for ${norm}`, call.args);
                 try {
-                  const result = await pluginRegistry.execute(call.name, (call.args || {}) as Record<string, any>);
+                  const result = await pluginRegistry.execute(call.name, (call.args || {}) as Record<string, any>, norm);
                   functionResponses.push({
                     id: call.id,
                     name: call.name,
@@ -125,7 +127,7 @@ When speaking, be conversational, direct, and action-oriented.
             if (serverContent.inputTranscription?.text) {
               const text = serverContent.inputTranscription.text;
               options.onTranscription('user', text);
-              db.addMessage({ role: 'user', content: text, mediaType: 'voice' });
+              db.addMessage(norm, { role: 'user', content: text, mediaType: 'voice' });
             }
 
             // Handle model speech chunks
@@ -141,7 +143,7 @@ When speaking, be conversational, direct, and action-oriented.
             if (serverContent.outputTranscription?.text) {
               const text = serverContent.outputTranscription.text;
               options.onTranscription('assistant', text);
-              db.addMessage({ role: 'assistant', content: text, mediaType: 'voice' });
+              db.addMessage(norm, { role: 'assistant', content: text, mediaType: 'voice' });
             }
 
             // Handle interruption
@@ -178,7 +180,7 @@ When speaking, be conversational, direct, and action-oriented.
         },
         sendText: (text: string) => {
           session.sendRealtimeInput({ text });
-          db.addMessage({ role: 'user', content: text, mediaType: 'text' });
+          db.addMessage(norm, { role: 'user', content: text, mediaType: 'text' });
         },
         close: () => {
           try {

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Sparkles, Radio, Calendar, MessageSquare, BarChart3 } from 'lucide-react';
 
-export type ActiveTab = 'aura' | 'actions' | 'myday' | 'comms' | 'dashboards';
+export type ActiveTab = 'aura' | 'actions' | 'myday' | 'comms';
 
 interface NavigationProps {
   activeTab: ActiveTab;
@@ -49,17 +49,11 @@ export const Navigation: React.FC<NavigationProps> = ({
       sublabel: 'Channels',
       icon: MessageSquare,
     },
-    {
-      id: 'dashboards',
-      label: 'Dashboards',
-      sublabel: 'Metrics',
-      icon: BarChart3,
-    },
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-[#08090d]/95 backdrop-blur-2xl border-t border-slate-800/80 px-1 py-1.5 max-w-md mx-auto shadow-2xl safe-bottom select-none">
-      <div className="grid grid-cols-5 items-center">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-[#08090d]/95 backdrop-blur-2xl border-t border-slate-800/80 px-2 py-1.5 max-w-md mx-auto shadow-2xl safe-bottom select-none">
+      <div className="grid grid-cols-4 items-center">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;

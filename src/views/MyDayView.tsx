@@ -73,6 +73,32 @@ export const MyDayView: React.FC<MyDayViewProps> = ({
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [checklists, setChecklists] = useState<ChecklistItem[]>([]);
 
+  // Fetch real Google Calendar events
+  React.useEffect(() => {
+    const email = localStorage.getItem('aura_user_email');
+    const customBackend = localStorage.getItem('aura_backend_url');
+    const targetUrl = customBackend ? `${customBackend.replace(/\/$/, '')}/api/calendar/events` : '/api/calendar/events';
+    fetch(targetUrl, {
+      headers: email ? { 'x-user-email': email } : {},
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          const mapped: CalendarEvent[] = data.map((evt: any) => ({
+            id: evt.id,
+            title: evt.summary,
+            startTime: evt.start ? new Date(evt.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+            endTime: evt.end ? new Date(evt.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+            syncedGoogle: true,
+          }));
+          setCalendarEvents(mapped);
+        }
+      })
+      .catch((err) => {
+        console.warn('[MyDayView] Calendar fetch note:', err);
+      });
+  }, []);
+
   // Modals / forms for user-created routines and checklists
   const [showAddRoutine, setShowAddRoutine] = useState(false);
   const [newRoutineTitle, setNewRoutineTitle] = useState('');

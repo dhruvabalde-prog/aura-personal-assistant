@@ -207,6 +207,22 @@ app.get('/api/stories', async (req: Request, res: Response) => {
   }
 });
 
+// Google Calendar Upcoming Events
+app.get('/api/calendar/events', async (req: Request, res: Response) => {
+  const email = getUserEmail(req);
+  try {
+    if (!googleAuth.isAuthenticated(email)) {
+      res.json([]);
+      return;
+    }
+    const events = await googleWorkspace.getUpcomingEvents(10, email);
+    res.json(events);
+  } catch (err: any) {
+    console.warn('[Calendar API] Fetch events note:', err.message);
+    res.json([]);
+  }
+});
+
 // Direct Orchestration Chat
 app.post('/api/agent/chat', async (req: Request, res: Response) => {
   const email = getUserEmail(req);
@@ -231,16 +247,33 @@ app.get('/api/auth/google/details', (req: Request, res: Response) => {
 });
 
 app.get('/api/auth/google/url', (req: Request, res: Response) => {
-  // Canonical production redirect URI requested by user
-  const redirectUri = 'https://aura-personal-ai-tau.vercel.app/api/auth/google/callback';
+  const host = req.headers.host || '';
+  const isLocal = host.includes('localhost') || host.includes('127.0.0.1') || host.startsWith('192.168.');
+  const proto = req.headers['x-forwarded-proto'] || (isLocal ? 'https' : 'https');
+  const origin = host ? `${proto}://${host}` : 'https://aura-personal-ai-tau.vercel.app';
+  
+  // Prefer process.env.GOOGLE_REDIRECT_URI or dynamic callback if on localhost / custom host
+  let redirectUri = process.env.GOOGLE_REDIRECT_URI || 'https://aura-personal-ai-tau.vercel.app/api/auth/google/callback';
+  if (req.query.redirectUri && typeof req.query.redirectUri === 'string') {
+    redirectUri = req.query.redirectUri;
+  } else if (isLocal) {
+    redirectUri = `${origin}/api/auth/google/callback`;
+  }
   const url = googleAuth.getAuthUrl(redirectUri);
-  res.json({ url, redirectUri });
+  res.json({ url, redirectUri, origin });
 });
 
 app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
   const code = req.query.code as string;
-  const redirectUri = 'https://aura-personal-ai-tau.vercel.app/api/auth/google/callback';
-  const returnOrigin = 'https://aura-personal-ai-tau.vercel.app';
+  const host = req.headers.host || '';
+  const isLocal = host.includes('localhost') || host.includes('127.0.0.1') || host.startsWith('192.168.');
+  const proto = req.headers['x-forwarded-proto'] || (isLocal ? 'https' : 'https');
+  const returnOrigin = host ? `${proto}://${host}` : 'https://aura-personal-ai-tau.vercel.app';
+
+  let redirectUri = process.env.GOOGLE_REDIRECT_URI || 'https://aura-personal-ai-tau.vercel.app/api/auth/google/callback';
+  if (isLocal) {
+    redirectUri = `${returnOrigin}/api/auth/google/callback`;
+  }
 
   if (!code) {
     res.redirect(`${returnOrigin}/?auth=error&reason=no_code`);
@@ -450,7 +483,8 @@ async function startServer() {
 
           if (msg.type === 'start') {
             const voiceGender = msg.voice === 'male' ? 'male' : 'female';
-            console.log(`[WebSocket] Starting Gemini Live with voice gender: ${voiceGender}`);
+            const userEmail = msg.userEmail || 'guest';
+            console.log(`[WebSocket] Starting Gemini Live with voice: ${voiceGender} for user: ${userEmail}`);
 
             if (activeLiveSession) {
               activeLiveSession.close();
@@ -460,6 +494,7 @@ async function startServer() {
             activeLiveSession = await geminiLive.createLiveSession({
               voice: voiceGender,
               voiceName: msg.voiceName,
+              userEmail,
               onAudioChunk: (base64Audio) => {
                 if (ws.readyState === WebSocket.OPEN) {
                   ws.send(JSON.stringify({ type: 'audio', data: base64Audio }));

@@ -36,10 +36,23 @@ export const VoiceView: React.FC<VoiceViewProps> = ({
   const [isArtifactsMenuOpen, setIsArtifactsMenuOpen] = useState(false);
   const [isMusicActive, setIsMusicActive] = useState(false);
   const [cameraFeedback, setCameraFeedback] = useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const handleCameraSnap = () => {
-    setCameraFeedback('Vision ready. Snap document or receipt in chat.');
-    setTimeout(() => setCameraFeedback(null), 3000);
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleFileCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setCameraFeedback(`Captured: ${file.name.slice(0, 20)}... Uploading to chat`);
+      setTimeout(() => {
+        setCameraFeedback(null);
+        onOpenChatTab();
+      }, 1500);
+    }
   };
 
   const handleToggleMusic = () => {
@@ -48,6 +61,16 @@ export const VoiceView: React.FC<VoiceViewProps> = ({
 
   return (
     <div className="relative flex flex-col items-center justify-between h-[calc(100vh-7.5rem)] p-4 max-w-md mx-auto select-none overflow-hidden">
+      {/* Hidden File / Camera Capture Input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handleFileCapture}
+        className="hidden"
+      />
+
       {/* Top Subtle Status Dots (Zero Text Clutter) */}
       <header className="w-full flex items-center justify-between pt-1 px-2 shrink-0">
         <button

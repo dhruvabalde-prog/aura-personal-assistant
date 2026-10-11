@@ -52,7 +52,12 @@ export const StoriesView: React.FC<StoriesViewProps> = ({
 
   const fetchStories = async () => {
     try {
-      const res = await fetch('/api/stories');
+      const email = localStorage.getItem('aura_user_email') || '';
+      const customBackend = localStorage.getItem('aura_backend_url');
+      const targetUrl = customBackend ? `${customBackend.replace(/\/$/, '')}/api/stories` : '/api/stories';
+      const res = await fetch(targetUrl, {
+        headers: email ? { 'x-user-email': email } : {},
+      });
       const data = await res.json();
       if (Array.isArray(data) && data.length > 0) {
         setStories(data);

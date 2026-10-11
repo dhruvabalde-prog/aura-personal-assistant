@@ -64,8 +64,9 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
   const [isRateLimited, setIsRateLimited] = useState(false);
 
   const getApiUrl = (endpoint: string) => {
-    if (window.location.hostname.includes('vercel.app')) {
-      return `https://implementing-prairie-realtor-farm.trycloudflare.com${endpoint}`;
+    const customBackend = localStorage.getItem('aura_backend_url');
+    if (customBackend) {
+      return `${customBackend.replace(/\/$/, '')}${endpoint}`;
     }
     return endpoint;
   };
