@@ -1,4 +1,13 @@
 import 'dotenv/config';
+
+process.on('uncaughtException', (err) => {
+  console.error('[Process] Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Process] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 import express, { Request, Response } from 'express';
 import https from 'https';
 import http from 'http';
