@@ -1,8 +1,9 @@
+import 'dotenv/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { UserWorkspace } from '../storage/db.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://hbnsrblknhmxdaogjjeb.supabase.co';
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'dummy_key';
 
 class SupabaseService {
   private client: SupabaseClient;
