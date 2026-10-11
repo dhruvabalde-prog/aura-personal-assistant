@@ -55,7 +55,7 @@ export const whatsappConnector: AppConnector = {
     }
 
     if (toolName === 'send_whatsapp_message') {
-      const result = await whatsappService.sendMessage(args.recipient, args.message);
+      const result = await whatsappService.sendMessage(args.recipient, args.message, userEmail);
       return { success: true, message: `WhatsApp message sent to ${args.recipient}.`, details: result };
     }
 

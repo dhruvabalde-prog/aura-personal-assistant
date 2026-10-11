@@ -378,13 +378,14 @@ app.get('/api/whatsapp/summary', async (req: Request, res: Response) => {
 });
 
 app.post('/api/whatsapp/send', async (req: Request, res: Response) => {
+  const email = getUserEmail(req);
   const { to, message } = req.body;
   if (!to || !message) {
     res.status(400).json({ error: 'to and message are required' });
     return;
   }
   try {
-    const result = await whatsappService.sendMessage(to, message);
+    const result = await whatsappService.sendMessage(to, message, email);
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
