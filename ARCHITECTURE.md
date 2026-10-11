@@ -1,7 +1,7 @@
 # AURA ARCHITECTURE & MULTI-REALM ALIGNMENT SPECIFICATION
 
 ## 1. System Vision & Persona
-**Aura** is an empathetic, hyper-competent AI Chief of Staff and personal operating system.
+**Aura** is an empathetic, hyper-competent AI personal assistant and personal operating system.
 - Operates 100% mobile-first for iOS and Android.
 - Listens to messy, unstructured thoughts and extracts actionable clerical work without robotic friction.
 - Operates under strict boundaries: **WhatsApp groups are strictly read-only; Aura never replies in groups**.
@@ -66,7 +66,7 @@
 
 ### 4. `Comms` Tab (Channels & Trackers)
 - **Channels**:
-  - **WhatsApp**: Status, QR/pairing code, 1-to-1 Chief of Staff bridge.
+  - **WhatsApp**: Status, QR/pairing code, 1-to-1 personal assistant bridge.
   - **Gmail**: Unread triage & draft approvals.
   - **Google Chat & Contacts**: Synced contacts lookup for sender name resolution.
 - **Dashboards & Trackers**:

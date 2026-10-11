@@ -4,7 +4,8 @@ import { AuraView } from './views/AuraView';
 import { ActionsView } from './views/ActionsView';
 import { MyDayView, RoutineItem } from './views/MyDayView';
 import { CommsView } from './views/CommsView';
-import { GoalsView, GoalItem } from './views/GoalsView';
+import { DashboardsView } from './views/DashboardsView';
+import { GoalItem } from './views/GoalsView';
 import { LeftDrawer, ChatSessionMeta } from './components/LeftDrawer';
 import { GoogleConnectModal } from './components/GoogleConnectModal';
 import { WhatsAppConnectModal, WhatsAppStatusData } from './components/WhatsAppConnectModal';
@@ -603,13 +604,11 @@ export const App: React.FC = () => {
           />
         )}
 
-        {activeTab === 'goals' && (
-          <GoalsView
-            goals={goals}
-            onAddGoal={handleAddGoal}
-            onToggleMilestone={handleToggleMilestone}
-            onDeleteGoal={handleDeleteGoal}
-            isLoading={isChatLoading}
+        {activeTab === 'dashboards' && (
+          <DashboardsView
+            tasksCount={tasks.filter((t) => !t.completed).length}
+            completedTasksCount={tasks.filter((t) => t.completed).length}
+            whatsappMessageCount={whatsappStatus?.messageCount || 0}
           />
         )}
       </main>

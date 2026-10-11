@@ -24,7 +24,7 @@ export class GoalPlannerService {
     const todayStr = new Date().toISOString().split('T')[0];
 
     const prompt = `
-You are Aura, an executive Chief of Staff specializing in reverse-engineered execution.
+You are Aura, a personal AI assistant specializing in reverse-engineered project execution.
 Today's Date: ${todayStr}
 Target Outcome: "${outcome}"
 Final Deadline: "${targetDate}"
