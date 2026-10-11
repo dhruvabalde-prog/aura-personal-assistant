@@ -3,7 +3,7 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "https://implementing-prairie-realtor-farm.trycloudflare.com/api/$1"
+      "destination": "https://brain-background-assumptions-hands.trycloudflare.com/api/$1"
     },
     {
       "source": "/(.*)",
