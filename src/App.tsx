@@ -430,8 +430,14 @@ export const App: React.FC = () => {
   const handleConnectGoogle = async () => {
     try {
       const res = await authFetch('/api/auth/google/url');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(res.status === 502 ? 'Backend service warming up (502). Please retry in a few moments.' : `HTTP ${res.status}: ${text.slice(0, 80)}`);
+      }
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       if (data?.url) {
         window.location.href = data.url;
       }
@@ -446,10 +452,17 @@ export const App: React.FC = () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ phoneNumber: phone }),
     });
-    const data = await res.json();
+    const text = await res.text();
+    let data: any = {};
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(res.status === 502 ? 'Backend tunnel warming up (502). Please retry in a few moments.' : `Server response (${res.status}): ${text.slice(0, 100)}`);
+    }
     if (!res.ok) throw new Error(data.error || 'Failed to start WhatsApp connection');
-    const status = await authFetch('/api/whatsapp/status').then((r) => r.json());
-    setWhatsappStatus(status);
+    const status = await authFetch('/api/whatsapp/status').then((r) => r.json()).catch(() => null);
+    if (status) setWhatsappStatus(status);
+    return data;
   };
 
   const handleRequestWhatsAppPairingCode = async (phone: string) => {
@@ -458,10 +471,16 @@ export const App: React.FC = () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ phoneNumber: phone }),
     });
-    const data = await res.json();
+    const text = await res.text();
+    let data: any = {};
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(res.status === 502 ? 'Backend tunnel warming up (502). Please retry in a few moments.' : `Server response (${res.status}): ${text.slice(0, 100)}`);
+    }
     if (!res.ok) throw new Error(data.error || 'Failed to request pairing code');
-    const status = await authFetch('/api/whatsapp/status').then((r) => r.json());
-    setWhatsappStatus(status);
+    const status = await authFetch('/api/whatsapp/status').then((r) => r.json()).catch(() => null);
+    if (status) setWhatsappStatus(status);
     return data.pairingCode || null;
   };
 

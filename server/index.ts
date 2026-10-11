@@ -252,26 +252,48 @@ app.get('/api/auth/google/url', (req: Request, res: Response) => {
   const proto = req.headers['x-forwarded-proto'] || (isLocal ? 'https' : 'https');
   const origin = host ? `${proto}://${host}` : 'https://aura-personal-ai-tau.vercel.app';
   
-  // Prefer process.env.GOOGLE_REDIRECT_URI or dynamic callback if on localhost / custom host
   let redirectUri = process.env.GOOGLE_REDIRECT_URI || 'https://aura-personal-ai-tau.vercel.app/api/auth/google/callback';
   if (req.query.redirectUri && typeof req.query.redirectUri === 'string') {
     redirectUri = req.query.redirectUri;
   } else if (isLocal) {
     redirectUri = `${origin}/api/auth/google/callback`;
   }
-  const url = googleAuth.getAuthUrl(redirectUri);
+
+  // Preserve frontend return origin in state
+  let clientOrigin = 'https://aura-personal-ai-tau.vercel.app';
+  if (req.headers.referer) {
+    try {
+      clientOrigin = new URL(req.headers.referer).origin;
+    } catch (e) {}
+  } else if (req.headers['x-forwarded-host']) {
+    clientOrigin = `https://${req.headers['x-forwarded-host']}`;
+  } else if (isLocal) {
+    clientOrigin = origin;
+  }
+
+  const url = googleAuth.getAuthUrl(redirectUri, clientOrigin);
   res.json({ url, redirectUri, origin });
 });
 
 app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
   const code = req.query.code as string;
-  const host = req.headers.host || '';
-  const isLocal = host.includes('localhost') || host.includes('127.0.0.1') || host.startsWith('192.168.');
-  const proto = req.headers['x-forwarded-proto'] || (isLocal ? 'https' : 'https');
-  const returnOrigin = host ? `${proto}://${host}` : 'https://aura-personal-ai-tau.vercel.app';
+  const state = req.query.state as string;
+
+  // Resolve return origin: preserve state, or x-forwarded-host, default to Vercel production
+  let returnOrigin = 'https://aura-personal-ai-tau.vercel.app';
+  if (state && (state.startsWith('http://') || state.startsWith('https://'))) {
+    returnOrigin = state.replace(/\/$/, '');
+  } else if (req.headers['x-forwarded-host']) {
+    returnOrigin = `https://${req.headers['x-forwarded-host']}`;
+  } else {
+    const host = req.headers.host || '';
+    if (host.includes('localhost') || host.includes('127.0.0.1')) {
+      returnOrigin = `https://${host}`;
+    }
+  }
 
   let redirectUri = process.env.GOOGLE_REDIRECT_URI || 'https://aura-personal-ai-tau.vercel.app/api/auth/google/callback';
-  if (isLocal) {
+  if (returnOrigin.includes('localhost') || returnOrigin.includes('127.0.0.1')) {
     redirectUri = `${returnOrigin}/api/auth/google/callback`;
   }
 

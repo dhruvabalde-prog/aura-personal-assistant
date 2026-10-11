@@ -45,7 +45,19 @@ class UserWhatsAppSession {
   public userPhone: string | null = null;
   public userName: string | null = null;
   public isInitializing: boolean = false;
+  public qrAttempts: number = 0;
   private authDir: string;
+
+  public isRegisteredOnDisk(): boolean {
+    const credsPath = path.join(this.authDir, 'creds.json');
+    if (!fs.existsSync(credsPath)) return false;
+    try {
+      const data = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
+      return !!data.registered;
+    } catch {
+      return false;
+    }
+  }
 
   constructor(email: string) {
     this.email = db.normalizeEmail(email);
@@ -222,6 +234,7 @@ class UserWhatsAppSession {
     }
 
     this.pairingMode = 'qr';
+    this.qrAttempts = 0;
     this.isInitializing = true;
     this.status = 'connecting';
 
@@ -335,10 +348,19 @@ class UserWhatsAppSession {
               this.connect(this.userPhone || undefined).catch(() => {});
             }, 2000);
           } else if (statusCode === 408) {
-            console.log(`[WhatsApp:${this.email}] QR awaiting scan; refreshing connection (code 408)...`);
-            setTimeout(() => {
-              this.connect(this.userPhone || undefined).catch(() => {});
-            }, 2000);
+            this.qrAttempts++;
+            if (this.pairingMode === 'qr' && this.qrAttempts <= 2) {
+              console.log(`[WhatsApp:${this.email}] QR awaiting scan (attempt ${this.qrAttempts}/2); refreshing in 3s...`);
+              setTimeout(() => {
+                this.connect(this.userPhone || undefined).catch(() => {});
+              }, 3000);
+            } else {
+              console.log(`[WhatsApp:${this.email}] QR scan idle or timed out. Stopping background QR refresh.`);
+              this.status = 'disconnected';
+              this.currentQrCode = null;
+              this.pairingMode = null;
+              this.qrAttempts = 0;
+            }
           } else if (state.creds.registered) {
             console.log(`[WhatsApp:${this.email}] Registered session disconnected. Reconnecting in 3s...`);
             setTimeout(() => {
@@ -699,9 +721,12 @@ ${JSON.stringify(messages.map((m) => ({ from: m.fromName, text: m.text, time: m.
       for (const email of allUsers) {
         if (email !== 'guest') {
           const session = this.getSession(email);
-          session.connect().catch((err) => {
-            console.warn(`[WhatsAppManager] Auto-reconnect notice for ${email}:`, err.message);
-          });
+          if (session.isRegisteredOnDisk()) {
+            console.log(`[WhatsAppManager] Auto-reconnecting registered session for: ${email}`);
+            session.connect().catch((err) => {
+              console.warn(`[WhatsAppManager] Auto-reconnect notice for ${email}:`, err.message);
+            });
+          }
         }
       }
     } catch (e) {
