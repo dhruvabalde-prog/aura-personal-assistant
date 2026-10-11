@@ -4,15 +4,16 @@ import { pluginRegistry } from './pluginRegistry.js';
 import '../connectors/index.js';
 
 export class AgentOrchestrator {
-  async processRawInput(input: string, mode: 'voice' | 'text' = 'text'): Promise<{
+  async processRawInput(input: string, mode: 'voice' | 'text' = 'text', userEmail?: string): Promise<{
     reply: string;
     toolExecutions: Array<{ name: string; args: any; result: any }>;
   }> {
-    const profile = db.getProfile();
-    const tasks = db.getTasks().filter((t) => !t.completed).slice(0, 5);
+    const norm = db.normalizeEmail(userEmail);
+    const profile = db.getProfile(norm);
+    const tasks = db.getTasks(norm).filter((t) => !t.completed).slice(0, 5);
 
-    // Collect available tools from enabled connectors
-    const allRegistered = pluginRegistry.getAllTools();
+    // Collect available tools from enabled connectors for this user
+    const allRegistered = pluginRegistry.getAllTools(norm);
     const toolDeclarations = allRegistered.map(({ tool }) => ({
       name: tool.name,
       description: tool.description,
@@ -20,7 +21,7 @@ export class AgentOrchestrator {
     }));
 
     const systemInstruction = `
-You are Aura, an empathetic, hyper-competent AI Chief of Staff.
+You are Aura, an empathetic, hyper-competent personal AI assistant.
 Your guiding principles:
 1. Speak simply, clearly, and concisely. No fluff, no unsolicited advice, no robotic preamble like "Sure, I can help with that".
 2. Understand raw, messy, unstructured human speech. The user might speak fragments, rambles, or emotional thoughts—extract the intent and take care of the clerical work.
@@ -47,8 +48,8 @@ User Information:
       const functionCalls = response.functionCalls;
       if (functionCalls && functionCalls.length > 0) {
         for (const call of functionCalls) {
-          // Add working notification in queue
-          const notif = db.addNotification({
+          // Add working notification in user's queue
+          const notif = db.addNotification(norm, {
             title: `Working: ${call.name.replace(/_/g, ' ')}`,
             message: 'Executing task in background...',
             type: 'working',
@@ -56,11 +57,11 @@ User Information:
           });
 
           try {
-            console.log(`[Orchestrator] Function call: ${call.name}`, call.args);
-            const result = await pluginRegistry.execute(call.name, (call.args || {}) as Record<string, any>);
+            console.log(`[Orchestrator] Function call: ${call.name} for ${norm}`, call.args);
+            const result = await pluginRegistry.execute(call.name, (call.args || {}) as Record<string, any>, norm);
             toolExecutions.push({ name: call.name, args: call.args, result });
 
-            db.updateNotification(notif.id, {
+            db.updateNotification(norm, notif.id, {
               title: `Completed: ${call.name.replace(/_/g, ' ')}`,
               message: 'Task completed successfully.',
               type: 'success',
@@ -70,7 +71,7 @@ User Information:
             console.error(`[Orchestrator] Error executing ${call.name}:`, toolErr);
             toolExecutions.push({ name: call.name, args: call.args, result: { error: toolErr.message } });
 
-            db.updateNotification(notif.id, {
+            db.updateNotification(norm, notif.id, {
               title: `Failed: ${call.name.replace(/_/g, ' ')}`,
               message: toolErr.message || 'Task encountered an error.',
               type: 'alert',
@@ -86,8 +87,8 @@ User Information:
         });
 
         const reply = followUp.text || "I've taken care of that for you.";
-        db.addMessage({ role: 'user', content: input, mediaType: mode });
-        db.addMessage({
+        db.addMessage(norm, { role: 'user', content: input, mediaType: mode });
+        db.addMessage(norm, {
           role: 'assistant',
           content: reply,
           mediaType: mode,
@@ -98,8 +99,8 @@ User Information:
       }
 
       const reply = response.text || "Got it. I'm on it.";
-      db.addMessage({ role: 'user', content: input, mediaType: mode });
-      db.addMessage({ role: 'assistant', content: reply, mediaType: mode });
+      db.addMessage(norm, { role: 'user', content: input, mediaType: mode });
+      db.addMessage(norm, { role: 'assistant', content: reply, mediaType: mode });
 
       return { reply, toolExecutions };
     } catch (err: any) {

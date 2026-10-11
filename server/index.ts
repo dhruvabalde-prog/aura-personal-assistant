@@ -18,6 +18,7 @@ import { googleWorkspaceConnector } from './connectors/googleWorkspaceConnector.
 import { whatsappService } from './services/whatsappService.js';
 import { supabaseService } from './services/supabaseService.js';
 import { getOrCreateCert } from './certs/certHelper.js';
+import { googleWorkspace } from './services/googleWorkspaceService.js';
 
 // Register initial connectors
 pluginRegistry.register(notesConnector);
@@ -151,8 +152,9 @@ import { insightsService } from './services/insightsService.js';
 
 // Actionable Stories Feed (WhatsApp Stories style cards)
 app.get('/api/stories', async (req: Request, res: Response) => {
+  const email = getUserEmail(req);
   try {
-    const stories = await insightsService.getActionableStories();
+    const stories = await insightsService.getActionableStories(email);
     res.json(stories);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to fetch stories' });
@@ -161,13 +163,14 @@ app.get('/api/stories', async (req: Request, res: Response) => {
 
 // Direct Orchestration Chat
 app.post('/api/agent/chat', async (req: Request, res: Response) => {
+  const email = getUserEmail(req);
   const { message, mode } = req.body;
   if (!message) {
     res.status(400).json({ error: 'Message is required' });
     return;
   }
   try {
-    const result = await orchestrator.processRawInput(message, mode || 'text');
+    const result = await orchestrator.processRawInput(message, mode || 'text', email);
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Internal error' });
@@ -203,6 +206,14 @@ app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
     try {
       await supabaseService.getOrCreateUserId(result.email);
       await db.hydrateUserFromSupabase(result.email);
+      // Automatically fetch Google Contacts right after OAuth login!
+      try {
+        const contacts = await googleWorkspace.getContacts(250, result.email);
+        db.saveContacts(result.email, contacts);
+        console.log(`[Google Contacts] Synced ${contacts.length} contacts for ${result.email}`);
+      } catch (cErr: any) {
+        console.warn('[Google Contacts] Initial contacts sync note:', cErr.message);
+      }
     } catch (err) {
       console.warn('[Auth] Supabase cloud hydration warning:', err);
     }
@@ -218,29 +229,41 @@ app.post('/api/auth/google/disconnect', (req: Request, res: Response) => {
   res.json({ success: true, message: 'Google account disconnected' });
 });
 
+// Google Contacts Endpoints
+app.get('/api/google/contacts', (req: Request, res: Response) => {
+  const email = getUserEmail(req);
+  res.json(db.getContacts(email));
+});
+
+app.post('/api/google/contacts/sync', async (req: Request, res: Response) => {
+  const email = getUserEmail(req);
+  try {
+    const contacts = await googleWorkspace.getContacts(250, email);
+    db.saveContacts(email, contacts);
+    res.json({ success: true, count: contacts.length, contacts });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to sync Google contacts' });
+  }
+});
+
 // WhatsApp Multi-Device Endpoints
 app.get('/api/whatsapp/saved-phone', (req: Request, res: Response) => {
   const email = getUserEmail(req);
-  if (email === 'guest') {
-    res.json({ phone: null });
-    return;
-  }
-  res.json({ phone: db.getSavedWhatsAppPhone(email) || null });
+  const phone = (email !== 'guest' ? db.getSavedWhatsAppPhone(email) : null) || null;
+  res.json({ phone });
 });
 
 app.post('/api/whatsapp/saved-phone', (req: Request, res: Response) => {
   const email = getUserEmail(req);
-  if (email === 'guest') {
-    res.status(400).json({ error: 'Please sign in with Google first to save your phone number.' });
-    return;
-  }
   const { phone } = req.body || {};
   if (!phone || phone.replace(/[^0-9]/g, '').length < 10) {
     res.status(400).json({ error: 'Please provide a valid 10-digit mobile number' });
     return;
   }
-  db.saveWhatsAppPhone(email, phone);
-  res.json({ success: true, phone: db.getSavedWhatsAppPhone(email) });
+  if (email !== 'guest') {
+    db.saveWhatsAppPhone(email, phone);
+  }
+  res.json({ success: true, phone: (email !== 'guest' ? db.getSavedWhatsAppPhone(email) : null) || null });
 });
 
 app.get('/api/whatsapp/status', (req: Request, res: Response) => {
@@ -251,10 +274,6 @@ app.get('/api/whatsapp/status', (req: Request, res: Response) => {
 app.post('/api/whatsapp/connect', async (req: Request, res: Response) => {
   try {
     const email = getUserEmail(req);
-    if (email === 'guest') {
-      res.status(400).json({ error: 'Please sign in with Google first before connecting WhatsApp.' });
-      return;
-    }
     const { phoneNumber } = req.body || {};
     await whatsappService.connect(phoneNumber, email);
     res.json({ success: true, status: whatsappService.getStatus(email) });
@@ -265,13 +284,9 @@ app.post('/api/whatsapp/connect', async (req: Request, res: Response) => {
 
 app.post('/api/whatsapp/pairing-code', async (req: Request, res: Response) => {
   const email = getUserEmail(req);
-  if (email === 'guest') {
-    res.status(400).json({ error: 'Please sign in with Google first before requesting a pairing code.' });
-    return;
-  }
   const { phoneNumber } = req.body;
   if (!phoneNumber) {
-    res.status(400).json({ error: 'phoneNumber is required (e.g. 15551234567)' });
+    res.status(400).json({ error: 'phoneNumber is required (e.g. 9876543210)' });
     return;
   }
   try {

@@ -25,12 +25,13 @@ export interface ActionableStoryCard {
 export class InsightsService {
   private workspace = new GoogleWorkspaceService();
 
-  async getActionableStories(): Promise<ActionableStoryCard[]> {
+  async getActionableStories(userEmail?: string): Promise<ActionableStoryCard[]> {
+    const norm = db.normalizeEmail(userEmail);
     const stories: ActionableStoryCard[] = [];
 
     // 1. Gather recent emails from Gmail
     try {
-      const emails = await this.workspace.getRecentEmails(6);
+      const emails = await this.workspace.getRecentEmails(6, norm);
       for (const email of emails) {
         const text = `${email.subject} ${email.snippet}`.toLowerCase();
         const isUrgent = text.includes('failed') || text.includes('urgent') || text.includes('action required') || text.includes('deadline');
@@ -63,7 +64,7 @@ export class InsightsService {
 
     // 2. Gather upcoming Calendar events
     try {
-      const events = await this.workspace.getUpcomingEvents(4);
+      const events = await this.workspace.getUpcomingEvents(4, norm);
       for (const evt of events) {
         stories.push({
           id: `cal-${evt.id}`,
@@ -83,27 +84,45 @@ export class InsightsService {
       // Calendar error
     }
 
-    // 3. Gather WhatsApp Messages from DB & Service
+    // 3. Gather WhatsApp Messages from DB & Service (Anti-Clutter Filter: 24h & High Signal)
     try {
-      const currentPhone = whatsappService.getStatus().user?.phone || whatsappService.getStatus().savedPhone || undefined;
-      const waMsgs = db.getWhatsAppMessages(currentPhone).slice(0, 8);
-      for (const msg of waMsgs) {
-        if (msg.fromMe) continue;
-        const draft = `Hi ${msg.fromName}, got your message: "${msg.text.slice(0, 50)}...". Looking into it right now!`;
+      const currentPhone = whatsappService.getStatus(norm).user?.phone || whatsappService.getStatus(norm).savedPhone || undefined;
+      const waMsgs = db.getWhatsAppMessages(norm, currentPhone);
+      const now = Date.now();
+      const maxAgeMs = 24 * 60 * 60 * 1000;
+      const noiseTokens = ['ok', 'k', 'cool', 'thanks', 'thank you', 'sure', 'done', 'yes', 'no', 'gm', 'gn'];
+      const promoRegex = /\b(otp|verification code|coupon|discount|deal|tracking|shipped|delivered|unsubscribed?)\b/i;
+
+      const filteredMsgs = waMsgs.filter((msg) => {
+        if (msg.fromMe) return false;
+        const age = now - new Date(msg.timestamp).getTime();
+        if (age > maxAgeMs) return false;
+        const text = msg.text.trim();
+        if (text.length < 8) return false;
+        if (noiseTokens.includes(text.toLowerCase())) return false;
+        if (promoRegex.test(text)) return false;
+        return true;
+      }).slice(0, 4);
+
+      for (const msg of filteredMsgs) {
+        const rawPhone = msg.from.split('@')[0];
+        const contactName = db.resolveContactName(rawPhone, norm) || msg.fromName;
+        const draft = `Hi ${contactName}, got your note: "${msg.text.slice(0, 50)}...". Looking into it right now!`;
+        const isUrgent = msg.text.toLowerCase().includes('urgent') || msg.text.toLowerCase().includes('need') || msg.text.toLowerCase().includes('asap');
 
         stories.push({
           id: `wa-${msg.id}`,
           source: 'whatsapp',
           sourceTitle: 'WhatsApp',
-          badge: 'Chat Update',
-          badgeColor: 'emerald',
-          sender: msg.fromName || msg.from,
+          badge: isUrgent ? 'Urgent Message' : 'Chat Update',
+          badgeColor: isUrgent ? 'rose' : 'emerald',
+          sender: contactName,
           senderContact: msg.from,
           timestamp: msg.timestamp,
-          headline: `Message from ${msg.fromName}`,
+          headline: `Message from ${contactName}`,
           actionRequirement: msg.text.slice(0, 140),
-          urgency: msg.text.toLowerCase().includes('urgent') || msg.text.toLowerCase().includes('need') ? 'high' : 'low',
-          suggestedAction: `Send WhatsApp approved reply to ${msg.fromName}`,
+          urgency: isUrgent ? 'high' : 'medium',
+          suggestedAction: `Send WhatsApp approved reply to ${contactName}`,
           draftReply: draft,
           needsApproval: true,
         });
@@ -113,7 +132,7 @@ export class InsightsService {
     }
 
     // 4. Pending clerical tasks
-    const tasks = db.getTasks().filter((t) => !t.completed).slice(0, 5);
+    const tasks = db.getTasks(norm).filter((t) => !t.completed).slice(0, 5);
     for (const t of tasks) {
       stories.push({
         id: `task-${t.id}`,
@@ -135,7 +154,7 @@ export class InsightsService {
       stories.push({
         id: 'story-welcome',
         source: 'system',
-        sourceTitle: 'Aura Chief of Staff',
+        sourceTitle: 'Aura Personal AI',
         badge: 'Daily Briefing',
         badgeColor: 'indigo',
         sender: 'Aura',

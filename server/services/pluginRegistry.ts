@@ -20,10 +20,10 @@ export interface AppConnector {
   name: string;
   description: string;
   category: 'communication' | 'google_workspace' | 'knowledge' | 'productivity' | 'custom';
-  isEnabled: () => boolean;
-  getStatus: () => { connected: boolean; details?: string };
+  isEnabled: (userEmail?: string) => boolean;
+  getStatus: (userEmail?: string) => { connected: boolean; details?: string };
   getTools: () => ConnectorToolDefinition[];
-  executeTool: (toolName: string, args: Record<string, any>) => Promise<any>;
+  executeTool: (toolName: string, args: Record<string, any>, userEmail?: string) => Promise<any>;
 }
 
 class PluginRegistry {
@@ -42,10 +42,10 @@ class PluginRegistry {
     return Array.from(this.connectors.values());
   }
 
-  getAllTools(): Array<{ connectorId: string; tool: ConnectorToolDefinition }> {
+  getAllTools(userEmail?: string): Array<{ connectorId: string; tool: ConnectorToolDefinition }> {
     const list: Array<{ connectorId: string; tool: ConnectorToolDefinition }> = [];
     for (const connector of this.connectors.values()) {
-      if (connector.isEnabled()) {
+      if (connector.isEnabled(userEmail)) {
         for (const tool of connector.getTools()) {
           list.push({ connectorId: connector.id, tool });
         }
@@ -54,30 +54,31 @@ class PluginRegistry {
     return list;
   }
 
-  async execute(toolName: string, args: Record<string, any>): Promise<any> {
+  async execute(toolName: string, args: Record<string, any>, userEmail?: string): Promise<any> {
     for (const connector of this.connectors.values()) {
-      if (connector.isEnabled()) {
+      if (connector.isEnabled(userEmail)) {
         const hasTool = connector.getTools().some((t) => t.name === toolName);
         if (hasTool) {
-          console.log(`[Plugin Registry] Executing ${toolName} on connector ${connector.name}`);
-          return await connector.executeTool(toolName, args);
+          console.log(`[Plugin Registry] Executing ${toolName} on connector ${connector.name} for ${userEmail || 'guest'}`);
+          return await connector.executeTool(toolName, args, userEmail);
         }
       }
     }
     throw new Error(`Tool "${toolName}" not found in any enabled connector.`);
   }
 
-  getStatusList() {
+  getStatusList(userEmail?: string) {
     return Array.from(this.connectors.values()).map((c) => ({
       id: c.id,
       name: c.name,
       description: c.description,
       category: c.category,
-      enabled: c.isEnabled(),
-      status: c.getStatus(),
+      enabled: c.isEnabled(userEmail),
+      status: c.getStatus(userEmail),
       toolsCount: c.getTools().length,
     }));
   }
 }
 
 export const pluginRegistry = new PluginRegistry();
+

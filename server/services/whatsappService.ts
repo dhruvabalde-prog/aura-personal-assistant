@@ -14,7 +14,6 @@ import { db, WhatsAppMessage } from '../storage/db.js';
 import { GoogleGenAI } from '@google/genai';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const BASE_AUTH_DIR = path.resolve(process.cwd(), 'storage', 'baileys_auth');
 
 export interface WhatsAppStatus {
   status: 'disconnected' | 'connecting' | 'connected';
@@ -40,55 +39,36 @@ export class WhatsAppService {
   private userPhone: string | null = null;
   private userName: string | null = null;
   private isInitializing: boolean = false;
-  private activeAuthDir: string = path.join(BASE_AUTH_DIR, 'default');
-  private currentActiveUserEmail: string = 'default';
+  private activeAuthDir: string = path.resolve(process.cwd(), 'storage', 'baileys_auth', 'guest');
+  private currentActiveUserEmail: string = 'guest';
 
   constructor() {
-    // Fresh session - do not auto-bind to unauthenticated callers
+    // Session initializes on demand
+  }
+
+  private getAuthDir(userEmail?: string): string {
+    const norm = db.normalizeEmail(userEmail);
+    return path.resolve(process.cwd(), 'storage', 'baileys_auth', encodeURIComponent(norm));
   }
 
   getStatus(userEmail?: string): WhatsAppStatus {
     const norm = db.normalizeEmail(userEmail);
-    if (!norm || norm === 'guest') {
-      return {
-        status: 'disconnected',
-        qrCode: null,
-        pairingCode: null,
-        pairingMode: null,
-        savedPhone: null,
-        user: null,
-        messageCount: 0,
-        targetPhone: null,
-      };
-    }
+    const savedPhone = norm !== 'guest' ? (db.getSavedWhatsAppPhone(norm) || null) : null;
+    const msgCount = norm !== 'guest' ? db.getWhatsAppMessages(norm).length : 0;
+    const isThisUser = this.currentActiveUserEmail === norm;
 
-    // Only if the current live socket belongs to this specific user
-    if (this.currentActiveUserEmail === norm) {
-      return {
-        status: this.status,
-        qrCode: this.currentQrCode,
-        pairingCode: this.currentPairingCode,
-        pairingMode: this.pairingMode,
-        savedPhone: db.getSavedWhatsAppPhone(norm) || this.userPhone || null,
-        user: this.status === 'connected' ? {
-          phone: this.userPhone || 'WhatsApp User',
-          name: this.userName || 'You',
-        } : null,
-        messageCount: db.getWhatsAppMessages(norm).length,
-        targetPhone: this.userPhone,
-      };
-    }
-
-    // Otherwise, this user is not the active socket session
     return {
-      status: 'disconnected',
-      qrCode: null,
-      pairingCode: null,
-      pairingMode: null,
-      savedPhone: db.getSavedWhatsAppPhone(norm) || null,
-      user: null,
-      messageCount: db.getWhatsAppMessages(norm).length,
-      targetPhone: null,
+      status: isThisUser ? this.status : 'disconnected',
+      qrCode: isThisUser ? this.currentQrCode : null,
+      pairingCode: isThisUser ? this.currentPairingCode : null,
+      pairingMode: isThisUser ? this.pairingMode : null,
+      savedPhone,
+      user: (isThisUser && this.status === 'connected') ? {
+        phone: this.userPhone || savedPhone || 'WhatsApp User',
+        name: this.userName || 'You',
+      } : null,
+      messageCount: msgCount,
+      targetPhone: isThisUser ? this.userPhone : null,
     };
   }
 
@@ -100,7 +80,6 @@ export class WhatsAppService {
       if (!Array.isArray(messages) || messages.length === 0) return;
 
       let importedCount = 0;
-      let actionableFound = 0;
 
       for (const msg of messages) {
         try {
@@ -115,14 +94,17 @@ export class WhatsAppService {
           const fromJid = msg.key.remoteJid || '';
           const fromMe = !!msg.key.fromMe;
           const isGroup = fromJid.endsWith('@g.us');
-          const fromName = msg.pushName || (isGroup ? 'Group Member' : fromJid.split('@')[0]);
+          const rawPhone = fromJid.split('@')[0];
+          const resolvedContact = db.resolveContactName(rawPhone, this.currentActiveUserEmail);
+          const fromName = resolvedContact || msg.pushName || (isGroup ? 'Group Member' : rawPhone);
 
+          const msgTimestampMs = (Number(msg.messageTimestamp) || Date.now() / 1000) * 1000;
           const storedMsg: WhatsAppMessage = {
             id: msg.key.id || `wa-${Date.now()}-${Math.random().toString(36).substring(7)}`,
             from: fromJid,
             fromName,
             text: text.trim(),
-            timestamp: new Date((Number(msg.messageTimestamp) || Date.now() / 1000) * 1000).toISOString(),
+            timestamp: new Date(msgTimestampMs).toISOString(),
             isGroup,
             fromMe,
             userPhone: this.userPhone || undefined,
@@ -131,8 +113,9 @@ export class WhatsAppService {
           db.addWhatsAppMessage(this.currentActiveUserEmail, storedMsg);
           importedCount++;
 
-          if (!fromMe) {
-            // Asynchronously detect action items without blocking
+          // Anti-clutter: ONLY extract tasks from messages in the last 24 hours
+          const isRecent = Date.now() - msgTimestampMs <= 24 * 60 * 60 * 1000;
+          if (!fromMe && isRecent) {
             this.detectAndAddTaskFromMessage(storedMsg);
           }
         } catch (historyErr) {
@@ -141,19 +124,19 @@ export class WhatsAppService {
       }
 
       console.log(`[WhatsApp] Successfully synced and stored ${importedCount} existing messages for user ${this.currentActiveUserEmail} (${this.userPhone})`);
-      db.addNotification(this.currentActiveUserEmail, {
-        title: 'WhatsApp Existing Chats Synced',
-        message: `Synced ${importedCount} existing chats and actively extracted pending action items for your daily priorities.`,
-        type: 'success',
-        status: 'completed',
-      });
+      if (this.currentActiveUserEmail !== 'guest') {
+        db.addNotification(this.currentActiveUserEmail, {
+          title: 'WhatsApp Existing Chats Synced',
+          message: `Synced ${importedCount} existing chats and actively extracted pending action items for your daily priorities.`,
+          type: 'success',
+          status: 'completed',
+        });
+      }
     };
 
-    // Listen to standard Baileys history sync event (both hyphenated and dot notation)
     (sock.ev as any).on('messaging-history.set', handleHistorySync);
     (sock.ev as any).on('messaging.history.set', handleHistorySync);
 
-    // Handle incoming real-time messages
     sock.ev.on('messages.upsert', async ({ messages }: any) => {
       for (const msg of messages) {
         try {
@@ -170,7 +153,9 @@ export class WhatsAppService {
           const fromJid = msg.key.remoteJid || '';
           const fromMe = !!msg.key.fromMe;
           const isGroup = fromJid.endsWith('@g.us');
-          const fromName = msg.pushName || (isGroup ? 'Group Member' : fromJid.split('@')[0]);
+          const rawPhone = fromJid.split('@')[0];
+          const resolvedContact = db.resolveContactName(rawPhone, this.currentActiveUserEmail);
+          const fromName = resolvedContact || msg.pushName || (isGroup ? 'Group Member' : rawPhone);
 
           const storedMsg: WhatsAppMessage = {
             id: msg.key.id || `wa-${Date.now()}`,
@@ -185,7 +170,43 @@ export class WhatsAppService {
 
           db.addWhatsAppMessage(this.currentActiveUserEmail, storedMsg);
 
-          if (!fromMe) {
+          // STRICT BOUNDARY: Groups are 100% READ-ONLY. Aura NEVER replies in groups!
+          if (isGroup) {
+            // Only passively extract tasks if someone assigns an action item in the group
+            if (!fromMe) {
+              this.detectAndAddTaskFromMessage(storedMsg);
+            }
+            continue;
+          }
+
+          // DEDICATED 1-TO-1 CHATBOX:
+          // If the message is a direct 1-to-1 message to Aura from the user (or in self-chat)
+          const isUserChatWithAura = fromMe || (this.userPhone && rawPhone === this.userPhone);
+          if (isUserChatWithAura && text.trim()) {
+            // Avoid infinite self-echo loops: check if message was sent by bot itself
+            if (msg.key.id?.startsWith('aura-reply-')) {
+              continue;
+            }
+
+            console.log(`[WhatsApp 1-to-1] User chatted with Aura: "${text.trim()}"`);
+            // Run through AgentOrchestrator asynchronously
+            (async () => {
+              try {
+                const { orchestrator } = await import('./agentOrchestrator.js');
+                const result = await orchestrator.processRawInput(text.trim(), 'text', this.currentActiveUserEmail);
+                if (result?.reply && sock) {
+                  // Reply back directly into the 1-to-1 thread
+                  await sock.sendMessage(fromJid, {
+                    text: result.reply,
+                  });
+                  console.log(`[WhatsApp 1-to-1] Aura replied: "${result.reply}"`);
+                }
+              } catch (orchErr: any) {
+                console.error('[WhatsApp 1-to-1] Error responding:', orchErr.message);
+              }
+            })();
+          } else if (!fromMe) {
+            // Direct message from a third party: passively detect tasks for user's clerical board
             this.detectAndAddTaskFromMessage(storedMsg);
           }
         } catch (msgErr) {
@@ -196,26 +217,21 @@ export class WhatsAppService {
   }
 
   async connect(phoneNumber?: string, userEmail?: string): Promise<void> {
-    const emailToUse = userEmail || (this.currentActiveUserEmail !== 'guest' ? this.currentActiveUserEmail : undefined);
-    const norm = db.normalizeEmail(emailToUse);
-    if (!norm || norm === 'guest') {
-      throw new Error('Please connect your Google Workspace account first to link WhatsApp to your profile.');
-    }
+    const norm = db.normalizeEmail(userEmail);
     this.currentActiveUserEmail = norm;
-    if (this.status === 'connected' && this.currentActiveUserEmail === norm) {
+    this.activeAuthDir = this.getAuthDir(norm);
+
+    if (this.status === 'connected' && this.sock) {
       return;
     }
 
-    const targetPhone = phoneNumber || db.getSavedWhatsAppPhone(norm);
+    const targetPhone = phoneNumber || (norm !== 'guest' ? db.getSavedWhatsAppPhone(norm) : undefined);
     if (targetPhone) {
       let clean = targetPhone.replace(/[^0-9]/g, '');
       if (clean.length === 10) clean = `91${clean}`;
       this.userPhone = clean;
-      db.saveWhatsAppPhone(norm, clean);
+      if (norm !== 'guest') db.saveWhatsAppPhone(norm, clean);
     }
-
-    const userFolder = norm.replace(/[^a-zA-Z0-9_-]/g, '_');
-    this.activeAuthDir = path.join(BASE_AUTH_DIR, `user_${userFolder}`);
 
     this.pairingMode = 'qr';
     this.isInitializing = true;
@@ -237,7 +253,7 @@ export class WhatsAppService {
 
       const { state, saveCreds } = await useMultiFileAuthState(this.activeAuthDir);
 
-      // If previous session had an unverified me.id from pairing code, clear it so QR connects cleanly without 401!
+      // If previous session had an unverified me.id without registration, clear it so QR connects cleanly
       if (!state.creds.registered && state.creds.me) {
         delete (state.creds as any).me;
         delete (state.creds as any).pairingCode;
@@ -252,7 +268,7 @@ export class WhatsAppService {
         auth: state,
         logger,
         printQRInTerminal: false,
-        browser: Browsers.windows('Chrome'),
+        browser: Browsers.ubuntu('Chrome'),
         generateHighQualityLinkPreview: true,
         syncFullHistory: true,
         connectTimeoutMs: 60000,
@@ -286,22 +302,18 @@ export class WhatsAppService {
           const userJid = this.sock?.user?.id || '';
           const currentPhone = userJid.split(':')[0] || userJid.split('@')[0];
           this.userName = this.sock?.user?.name || 'WhatsApp User';
-
-          // Guarantee user isolation: wipe messages ONLY if switching to a different account!
-          if (this.userPhone && this.userPhone !== currentPhone) {
-            console.log(`[WhatsApp] Account changed from ${this.userPhone} to ${currentPhone}. Clearing previous messages.`);
-            db.clearWhatsAppMessages(this.currentActiveUserEmail);
-          }
           this.userPhone = currentPhone;
 
-          db.toggleConnector(this.currentActiveUserEmail, 'whatsapp', true);
-
-          db.addNotification(this.currentActiveUserEmail, {
-            title: 'WhatsApp Connected',
-            message: `Linked to +${this.userPhone}. All messages and priorities are actively syncing.`,
-            type: 'success',
-            status: 'completed',
-          });
+          if (this.currentActiveUserEmail !== 'guest') {
+            db.saveWhatsAppPhone(this.currentActiveUserEmail, currentPhone);
+            db.toggleConnector(this.currentActiveUserEmail, 'whatsapp', true);
+            db.addNotification(this.currentActiveUserEmail, {
+              title: 'WhatsApp Connected',
+              message: `Linked to +${this.userPhone}. All messages and priorities are actively syncing.`,
+              type: 'success',
+              status: 'completed',
+            });
+          }
         }
 
         if (connection === 'close') {
@@ -335,25 +347,24 @@ export class WhatsAppService {
               }, 1500);
             }
           } else if (statusCode === DisconnectReason.restartRequired || statusCode === 515) {
-            // Restart required by WhatsApp handshake: MUST RECONNECT IMMEDIATELY WITHOUT WIPING CREDS
-            console.log('[WhatsApp] Restart required (515). Reconnecting immediately without deleting credentials...');
+            // Handshake complete or restart required: RECONNECT IMMEDIATELY WITHOUT WIPING CREDS
+            console.log('[WhatsApp] Restart required (515). Reconnecting immediately with saved credentials...');
             setTimeout(() => {
               this.isInitializing = false;
               this.connect(this.userPhone || undefined, this.currentActiveUserEmail).catch((e) => {
                 console.warn('[WhatsApp] Reconnect 515 warning:', e.message);
               });
             }, 1000);
-          } else if (this.pairingMode === 'qr' && statusCode === 408) {
-            // QR timed out waiting for scan; regenerate fresh QR code cleanly
-            console.log('[WhatsApp] QR scan timed out (408). Regenerating fresh QR code...');
+          } else if (this.pairingMode === 'qr') {
+            console.log(`[WhatsApp] QR awaiting scan; refreshing connection (code ${statusCode})...`);
+            this.status = 'connecting';
             setTimeout(() => {
               this.isInitializing = false;
               this.connect(this.userPhone || undefined, this.currentActiveUserEmail).catch((e) => {
                 console.warn('[WhatsApp] QR timeout refresh warning:', e.message);
               });
-            }, 1500);
+            }, 1200);
           } else if (state.creds.registered) {
-            // Registered session disconnected; auto-reconnect
             console.log('[WhatsApp] Registered session disconnected. Reconnecting in 3s...');
             setTimeout(() => {
               this.isInitializing = false;
@@ -375,16 +386,11 @@ export class WhatsAppService {
   }
 
   async requestPairingCode(phoneNumber: string, userEmail?: string): Promise<string> {
-    const emailToUse = userEmail || (this.currentActiveUserEmail !== 'guest' ? this.currentActiveUserEmail : undefined);
-    const norm = db.normalizeEmail(emailToUse);
-    if (!norm || norm === 'guest') {
-      throw new Error('Please connect your Google Workspace account first to link WhatsApp to your profile.');
-    }
+    const norm = db.normalizeEmail(userEmail);
     this.currentActiveUserEmail = norm;
+    this.activeAuthDir = this.getAuthDir(norm);
 
     let cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
-
-    // Auto-normalize 10-digit mobile numbers
     if (cleanNumber.length === 10) {
       cleanNumber = `91${cleanNumber}`;
     } else if (cleanNumber.length === 11 && cleanNumber.startsWith('0')) {
@@ -397,9 +403,7 @@ export class WhatsAppService {
 
     this.pairingMode = 'code';
     this.userPhone = cleanNumber;
-    db.saveWhatsAppPhone(norm, cleanNumber);
-    const userFolder = norm.replace(/[^a-zA-Z0-9_-]/g, '_');
-    this.activeAuthDir = path.join(BASE_AUTH_DIR, `user_${userFolder}`);
+    if (norm !== 'guest') db.saveWhatsAppPhone(norm, cleanNumber);
 
     if (this.sock) {
       try {
@@ -420,12 +424,16 @@ export class WhatsAppService {
 
     const { state, saveCreds } = await useMultiFileAuthState(this.activeAuthDir);
 
-    // Wipe any unverified state so handshake is 100% clean
-    if (!state.creds.registered) {
-      delete (state.creds as any).me;
-      delete (state.creds as any).pairingCode;
-      await saveCreds();
+    if (state.creds.registered) {
+      console.log('[WhatsApp] Session is already registered. Connecting directly...');
+      await this.connect(cleanNumber, this.currentActiveUserEmail);
+      return 'CONNECTED';
     }
+
+    // Wipe any unverified state so handshake is 100% clean
+    delete (state.creds as any).me;
+    delete (state.creds as any).pairingCode;
+    await saveCreds();
 
     const { version } = await fetchLatestBaileysVersion();
     const logger = pino({ level: 'silent' });
@@ -445,29 +453,6 @@ export class WhatsAppService {
 
     this.sock.ev.on('creds.update', saveCreds);
 
-    let readyResolved = false;
-    const socketReadyPromise = new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => {
-        if (!readyResolved) {
-          readyResolved = true;
-          console.log('[WhatsApp] Socket ready timeout reached, attempting pairing code...');
-          resolve();
-        }
-      }, 6000);
-
-      const updateListener = (update: any) => {
-        if (update.qr) {
-          if (!readyResolved) {
-            readyResolved = true;
-            clearTimeout(timeout);
-            console.log('[WhatsApp] Socket handshake ready for pairing code exchange');
-            resolve();
-          }
-        }
-      };
-      this.sock?.ev.on('connection.update', updateListener);
-    });
-
     this.sock.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect } = update;
 
@@ -482,24 +467,27 @@ export class WhatsAppService {
         this.userPhone = userJid.split(':')[0] || userJid.split('@')[0];
         this.userName = this.sock?.user?.name || 'WhatsApp User';
 
-        db.toggleConnector(this.currentActiveUserEmail, 'whatsapp', true);
-
-        db.addNotification(this.currentActiveUserEmail, {
-          title: 'WhatsApp Connected',
-          message: `Linked to +${this.userPhone}. All messages and clerical tasks are actively syncing.`,
-          type: 'success',
-          status: 'completed',
-        });
+        if (this.currentActiveUserEmail !== 'guest') {
+          db.saveWhatsAppPhone(this.currentActiveUserEmail, this.userPhone);
+          db.toggleConnector(this.currentActiveUserEmail, 'whatsapp', true);
+          db.addNotification(this.currentActiveUserEmail, {
+            title: 'WhatsApp Connected',
+            message: `Linked to +${this.userPhone}. All messages and clerical tasks are actively syncing.`,
+            type: 'success',
+            status: 'completed',
+          });
+        }
       }
 
       if (connection === 'close') {
         const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
         console.log(`[WhatsApp] Pairing connection closed. Status Code: ${statusCode}`);
         if (statusCode === 515 || statusCode === DisconnectReason.restartRequired) {
-          console.log('[WhatsApp] 515 on pairing. Reconnecting immediately...');
+          // Handshake confirmed by phone! Reconnect using connect() so it connects with verified keys!
+          console.log('[WhatsApp] Handshake confirmed by phone (515)! Finalizing connection...');
           setTimeout(() => {
-            this.requestPairingCode(cleanNumber, this.currentActiveUserEmail).catch((e) => {
-              console.warn('[WhatsApp] Pairing 515 retry warning:', e.message);
+            this.connect(cleanNumber, this.currentActiveUserEmail).catch((e) => {
+              console.warn('[WhatsApp] Post-pairing 515 connect warning:', e.message);
             });
           }, 1000);
         } else if (state.creds.registered) {
@@ -517,8 +505,8 @@ export class WhatsAppService {
 
     this.attachMessageHandlers(this.sock);
 
-    // Wait until socket is open and ready to exchange link_code_companion_reg
-    await socketReadyPromise;
+    // Give socket 2.5 seconds to establish WebSocket Noise handshake
+    await new Promise((r) => setTimeout(r, 2500));
 
     if (!this.sock) {
       throw new Error('WhatsApp engine failed to initialize');
@@ -543,9 +531,22 @@ export class WhatsAppService {
     }
   }
 
-  // AI Task Detection from WhatsApp messages
+  // AI Task Detection from WhatsApp messages (Strict Anti-Clutter & Recency Gate)
   private async detectAndAddTaskFromMessage(msg: WhatsAppMessage) {
-    const textLower = msg.text.toLowerCase();
+    // 1. Recency filter: skip messages older than 24 hours
+    const msgTime = new Date(msg.timestamp).getTime();
+    if (Date.now() - msgTime > 24 * 60 * 60 * 1000) return;
+
+    // 2. Length & Noise Filter: skip short acknowledgments
+    const textTrim = msg.text.trim();
+    if (textTrim.length < 8) return;
+    const noiseTokens = ['ok', 'k', 'cool', 'thanks', 'thank you', 'sure', 'done', 'yes', 'no', 'gm', 'gn', 'tc', 'hru', 'wbu'];
+    if (noiseTokens.includes(textTrim.toLowerCase())) return;
+
+    // 3. Skip automated OTPs, promos, delivery tracking
+    const promoRegex = /\b(otp|verification code|coupon|discount|deal|tracking|shipped|delivered|unsubscribed?)\b/i;
+    if (promoRegex.test(textTrim)) return;
+
     const taskIndicators = [
       'please', 'can you', 'could you', 'send me', 'remind', 'deadline',
       'meeting', 'by tomorrow', 'by 5', 'by 4', 'by 3', 'by 2', 'by 1', 'call me',
@@ -553,16 +554,23 @@ export class WhatsAppService {
       'share', 'update', 'status', 'karo', 'bhejo', 'call karna', 'batana', 'check', 'review', 'asap'
     ];
 
-    const hasIndicator = taskIndicators.some((word) => textLower.includes(word));
+    const hasIndicator = taskIndicators.some((word) => textTrim.toLowerCase().includes(word));
     if (!hasIndicator) return;
+
+    // Resolve sender contact name from Google Contacts if available
+    const rawPhone = msg.from.split('@')[0];
+    const resolvedContact = db.resolveContactName(rawPhone, this.currentActiveUserEmail) ||
+                            db.resolveContactName(msg.userPhone, this.currentActiveUserEmail);
+    const senderName = resolvedContact || msg.fromName;
 
     try {
       const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
       const prompt = `
-Analyze this WhatsApp message from "${msg.fromName}":
+Analyze this WhatsApp message from "${senderName}":
 "${msg.text}"
 
-Does this message contain an actionable task, request, or commitment for the recipient?
+Does this message contain a genuine, high-priority actionable task, request, or commitment for the recipient?
+Filter out casual chitchat, trivial confirmations, and vague mentions.
 If YES, respond ONLY with valid JSON:
 {
   "hasTask": true,
@@ -583,14 +591,14 @@ If NO, respond ONLY with:
       const parsed = JSON.parse(res.text || '{}');
       if (parsed.hasTask && parsed.title) {
         db.addTask(this.currentActiveUserEmail, {
-          title: `[WhatsApp: ${msg.fromName}] ${parsed.title}`,
+          title: `[WhatsApp: ${senderName}] ${parsed.title}`,
           deadline: parsed.deadline || undefined,
           urgency: parsed.urgency || 'medium',
           source: 'whatsapp',
-          sender: msg.fromName,
+          sender: senderName,
           completed: false,
         });
-        console.log(`[WhatsApp] Action item detected and added to tasks for ${this.currentActiveUserEmail}: "${parsed.title}"`);
+        console.log(`[WhatsApp] Action item detected from ${senderName} and added to tasks: "${parsed.title}"`);
       }
     } catch (err) {
       // Non-blocking
@@ -611,7 +619,7 @@ If NO, respond ONLY with:
     try {
       const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
       const prompt = `
-You are Aura, an empathetic Chief of Staff.
+You are Aura, an empathetic personal AI assistant.
 Summarize these recent WhatsApp messages for the user in 2 to 3 very simple, natural, spoken sentences.
 Highlight who messaged and what they need, in calm everyday layman language:
 
@@ -651,9 +659,7 @@ ${JSON.stringify(messages.map((m) => ({ from: m.fromName, text: m.text, time: m.
       try {
         this.sock.logout();
         this.sock.end(undefined);
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) {}
       this.sock = null;
     }
     this.status = 'disconnected';
@@ -663,7 +669,7 @@ ${JSON.stringify(messages.map((m) => ({ from: m.fromName, text: m.text, time: m.
     this.userPhone = null;
     this.userName = null;
     this.clearAuth();
-    if (norm && norm !== 'guest') {
+    if (norm !== 'guest') {
       db.saveWhatsAppPhone(norm, '');
       db.toggleConnector(norm, 'whatsapp', false);
     }

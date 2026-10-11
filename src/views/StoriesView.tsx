@@ -28,6 +28,8 @@ export interface ActionableStoryCard {
   actionRequirement: string;
   urgency: 'high' | 'medium' | 'low';
   suggestedAction: string;
+  draftReply?: string;
+  senderContact?: string;
 }
 
 interface StoriesViewProps {

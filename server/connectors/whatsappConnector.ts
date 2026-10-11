@@ -8,8 +8,8 @@ export const whatsappConnector: AppConnector = {
   description: 'Multi-device WhatsApp engine for checking updates, summarizing messages, and drafting replies',
   category: 'communication',
   isEnabled: () => true,
-  getStatus: () => {
-    const s = whatsappService.getStatus();
+  getStatus: (userEmail?: string) => {
+    const s = whatsappService.getStatus(userEmail);
     if (s.status === 'connected') {
       return { connected: true, details: `Connected as ${s.user?.phone || 'Linked Device'}` };
     }
@@ -48,9 +48,9 @@ export const whatsappConnector: AppConnector = {
       },
     },
   ],
-  executeTool: async (toolName: string, args: Record<string, any>) => {
+  executeTool: async (toolName: string, args: Record<string, any>, userEmail?: string) => {
     if (toolName === 'get_whatsapp_updates') {
-      const summary = await whatsappService.getUpdatesSummary();
+      const summary = await whatsappService.getUpdatesSummary(userEmail);
       return { summary };
     }
 
@@ -60,7 +60,7 @@ export const whatsappConnector: AppConnector = {
     }
 
     if (toolName === 'search_whatsapp_chats') {
-      const messages = db.getWhatsAppMessages();
+      const messages = db.getWhatsAppMessages(userEmail);
       const filtered = messages.filter((m) => {
         const matchesContact = args.contactName
           ? m.fromName.toLowerCase().includes(args.contactName.toLowerCase()) || m.from.includes(args.contactName)

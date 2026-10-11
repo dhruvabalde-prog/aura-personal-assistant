@@ -3,7 +3,7 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "https://commitment-prerequisite-cage-snowboard.trycloudflare.com/api/$1"
+      "destination": "https://implementing-prairie-realtor-farm.trycloudflare.com/api/$1"
     },
     {
       "source": "/(.*)",

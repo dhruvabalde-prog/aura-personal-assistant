@@ -102,6 +102,14 @@ export interface ConnectorItem {
   config: Record<string, any>;
 }
 
+export interface ContactPerson {
+  resourceName?: string;
+  name: string;
+  phoneNumbers: string[];
+  emails: string[];
+  organization?: string;
+}
+
 export interface UserWorkspace {
   email: string;
   profile: UserProfile;
@@ -112,6 +120,7 @@ export interface UserWorkspace {
   whatsappMessages: WhatsAppMessage[];
   notifications: NotificationItem[];
   savedWhatsAppPhone?: string;
+  contacts?: ContactPerson[];
   connectors: ConnectorItem[];
   createdAt: string;
 }
@@ -148,21 +157,21 @@ function createInitialWorkspace(email: string): UserWorkspace {
       preferredVoice: 'female',
       preferredLanguage: 'English',
       emotionalContext: {
-        lastMood: 'Calm & Focused',
+        lastMood: 'Calm',
         stressLevel: 'low',
         energyLevel: 'moderate',
-        notes: ['Personal workspace initialized. Ready for Google Workspace and WhatsApp integration.'],
+        notes: [],
         updatedAt: new Date().toISOString(),
       },
-      habits: ['Morning briefing check', 'WhatsApp unread catch-up', 'Daily schedule review'],
+      habits: [],
       keyPeople: [],
-      dailyPriorities: ['Connect Google Workspace', 'Connect WhatsApp Multi-Device'],
+      dailyPriorities: [],
     },
     messages: [
       {
         id: `welcome-${Date.now()}`,
         role: 'assistant',
-        content: "Hello! I am Aura, your personal voice-first Chief of Staff. I'm here to handle your schedule, emails, and WhatsApp tasks with complete privacy. How can I assist you today?",
+        content: "Hello! I am Aura, your personal AI assistant. How can I help you today?",
         timestamp: new Date().toISOString(),
         mediaType: 'text',
       },
@@ -445,7 +454,6 @@ class Database {
   // --- WhatsApp Phone & Settings Methods ---
   getSavedWhatsAppPhone(email?: string): string | undefined {
     const norm = this.normalizeEmail(email);
-    if (norm === 'guest') return undefined;
     return this.getUserWorkspace(norm).savedWhatsAppPhone;
   }
 
@@ -459,12 +467,54 @@ class Database {
       phone = arg1;
     }
     const norm = this.normalizeEmail(email);
-    if (norm === 'guest') return;
     let clean = phone ? phone.replace(/[^0-9]/g, '') : '';
     if (clean.length === 10) clean = `91${clean}`;
     const ws = this.getUserWorkspace(norm);
     ws.savedWhatsAppPhone = clean || undefined;
     this.save(norm);
+  }
+
+  // --- Google Contacts Methods ---
+  getContacts(email?: string): ContactPerson[] {
+    const ws = this.getUserWorkspace(email);
+    return ws.contacts || [];
+  }
+
+  saveContacts(email: string | undefined, contacts: ContactPerson[]) {
+    const ws = this.getUserWorkspace(email);
+    ws.contacts = contacts;
+    if (!ws.profile.keyPeople) ws.profile.keyPeople = [];
+    const existingKeyNames = new Set(ws.profile.keyPeople.map((k) => k.name.toLowerCase()));
+    for (const c of contacts) {
+      if (!existingKeyNames.has(c.name.toLowerCase()) && c.name && c.name !== 'Unknown Contact') {
+        ws.profile.keyPeople.push({
+          name: c.name,
+          relation: c.organization || 'Google Contact',
+          notes: c.phoneNumbers[0] ? `Mobile: +${c.phoneNumbers[0]}` : (c.emails[0] ? `Email: ${c.emails[0]}` : undefined),
+        });
+        existingKeyNames.add(c.name.toLowerCase());
+        if (ws.profile.keyPeople.length >= 35) break;
+      }
+    }
+    this.save(email);
+  }
+
+  resolveContactName(phoneOrEmail?: string, email?: string): string | null {
+    if (!phoneOrEmail) return null;
+    const clean = phoneOrEmail.replace(/[^0-9]/g, '');
+    const cleanNorm = clean.length === 10 ? `91${clean}` : clean;
+    const emailLower = phoneOrEmail.toLowerCase().trim();
+
+    const contacts = this.getContacts(email);
+    for (const c of contacts) {
+      if (cleanNorm && c.phoneNumbers && c.phoneNumbers.some((p) => p === cleanNorm || p.endsWith(cleanNorm) || cleanNorm.endsWith(p))) {
+        return c.name;
+      }
+      if (emailLower && c.emails && c.emails.some((e) => e === emailLower)) {
+        return c.name;
+      }
+    }
+    return null;
   }
 
   // --- Tasks Methods ---

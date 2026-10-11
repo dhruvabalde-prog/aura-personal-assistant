@@ -45,9 +45,9 @@ export const tasksConnector: AppConnector = {
       },
     },
   ],
-  executeTool: async (toolName: string, args: Record<string, any>) => {
+  executeTool: async (toolName: string, args: Record<string, any>, userEmail?: string) => {
     if (toolName === 'create_task') {
-      const task = db.addTask({
+      const task = db.addTask(userEmail || 'guest', {
         title: args.title,
         deadline: args.deadline,
         urgency: args.urgency || 'medium',
@@ -58,12 +58,12 @@ export const tasksConnector: AppConnector = {
     }
 
     if (toolName === 'list_pending_tasks') {
-      const tasks = db.getTasks().filter((t) => !t.completed);
+      const tasks = db.getTasks(userEmail).filter((t) => !t.completed);
       return { tasks };
     }
 
     if (toolName === 'mark_task_completed') {
-      db.updateTask(args.taskId, { completed: true });
+      db.updateTask(userEmail || 'guest', args.taskId, { completed: true });
       return { success: true, message: 'Task marked as completed.' };
     }
 

@@ -6,7 +6,7 @@
   "scripts": {
     "server": "tsx watch server/index.ts",
     "client": "vite",
-    "build": "vite build && tsc -p server/tsconfig.json",
+    "build": "vite build && node --max-old-space-size=4096 node_modules/typescript/bin/tsc -p server/tsconfig.json",
     "dev": "tsx server/index.ts",
     "test": "node --test"
   },

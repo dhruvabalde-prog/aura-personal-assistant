@@ -16,42 +16,16 @@ export const OAUTH_SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets',
   'https://www.googleapis.com/auth/presentations',
   'https://www.googleapis.com/auth/forms.body',
+  'https://www.googleapis.com/auth/contacts.readonly',
 ];
 
 export class GoogleAuthService {
-  private oauth2Client: any;
-
   constructor() {
-    this.oauth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
-
-    const existingTokens = db.getGoogleTokens();
-    if (existingTokens) {
-      this.oauth2Client.setCredentials({
-        access_token: existingTokens.access_token,
-        refresh_token: existingTokens.refresh_token,
-        expiry_date: existingTokens.expiry_date,
-        token_type: existingTokens.token_type,
-        scope: existingTokens.scope,
-      });
-    }
-
-    this.oauth2Client.on('tokens', (tokens: any) => {
-      console.log('[Google Auth] New tokens received');
-      const current = db.getGoogleTokens() || {};
-      db.saveGoogleTokens({
-        ...current,
-        access_token: tokens.access_token || current.access_token,
-        refresh_token: tokens.refresh_token || current.refresh_token,
-        expiry_date: tokens.expiry_date || current.expiry_date,
-        token_type: tokens.token_type || current.token_type,
-        scope: tokens.scope || current.scope,
-      });
-    });
+    // Dynamic per-user credentials
   }
 
   getOAuthDetails(host?: string, userEmail?: string) {
     const isCloudflare = host && host.includes('trycloudflare.com');
-    // Main redirect URI is the production Vercel URI
     const effectiveRedirectUri = REDIRECT_URI;
 
     const isAuth = this.isAuthenticated(userEmail);
@@ -70,9 +44,11 @@ export class GoogleAuthService {
   }
 
   getAuthUrl(redirectUriOverride?: string): string {
-    const client = redirectUriOverride
-      ? new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, redirectUriOverride)
-      : this.oauth2Client;
+    const client = new google.auth.OAuth2(
+      CLIENT_ID,
+      CLIENT_SECRET,
+      redirectUriOverride || REDIRECT_URI
+    );
 
     return client.generateAuthUrl({
       access_type: 'offline',
@@ -83,19 +59,21 @@ export class GoogleAuthService {
 
   async handleCallback(code: string, redirectUriOverride?: string): Promise<{ success: boolean; email?: string; error?: string }> {
     try {
-      const client = redirectUriOverride
-        ? new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, redirectUriOverride)
-        : this.oauth2Client;
+      const client = new google.auth.OAuth2(
+        CLIENT_ID,
+        CLIENT_SECRET,
+        redirectUriOverride || REDIRECT_URI
+      );
 
       const { tokens } = await client.getToken(code);
-      this.oauth2Client.setCredentials(tokens);
+      client.setCredentials(tokens);
 
       let userEmail = 'Google Workspace User';
       try {
-        const oauth2 = google.oauth2({ version: 'v2', auth: this.oauth2Client });
+        const oauth2 = google.oauth2({ version: 'v2', auth: client });
         const userInfo = await oauth2.userinfo.get();
         if (userInfo.data.email) {
-          userEmail = userInfo.data.email;
+          userEmail = userInfo.data.email.trim().toLowerCase();
         }
       } catch (err) {
         console.warn('[Google Auth] Could not fetch user email info:', err);
@@ -124,22 +102,41 @@ export class GoogleAuthService {
   }
 
   getClient(userEmail?: string) {
-    const tokens = db.getGoogleTokens(userEmail);
-    if (tokens && tokens.access_token) {
-      this.oauth2Client.setCredentials({
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
-        expiry_date: tokens.expiry_date,
-        token_type: tokens.token_type,
-        scope: tokens.scope,
-      });
+    const norm = db.normalizeEmail(userEmail);
+    const tokens = db.getGoogleTokens(norm);
+    if (!tokens || (!tokens.access_token && !tokens.refresh_token)) {
+      throw new Error(`Google Workspace is not connected for ${norm}. Please authorize your Google account first.`);
     }
-    return this.oauth2Client;
+
+    const client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
+    client.setCredentials({
+      access_token: tokens.access_token || undefined,
+      refresh_token: tokens.refresh_token || undefined,
+      expiry_date: tokens.expiry_date || undefined,
+      token_type: tokens.token_type || undefined,
+      scope: tokens.scope || undefined,
+    });
+
+    client.on('tokens', (newTokens: any) => {
+      console.log(`[Google Auth] Tokens refreshed for user: ${norm}`);
+      const current = db.getGoogleTokens(norm) || {};
+      db.saveGoogleTokens(norm, {
+        ...current,
+        access_token: newTokens.access_token || current.access_token,
+        refresh_token: newTokens.refresh_token || current.refresh_token,
+        expiry_date: newTokens.expiry_date || current.expiry_date,
+        token_type: newTokens.token_type || current.token_type,
+        scope: newTokens.scope || current.scope,
+        userEmail: norm,
+      });
+    });
+
+    return client;
   }
 
   disconnect(userEmail?: string) {
-    db.saveGoogleTokens(userEmail, null);
-    this.oauth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
+    const norm = db.normalizeEmail(userEmail);
+    db.saveGoogleTokens(norm, null);
   }
 }
 

@@ -7,9 +7,9 @@ export const googleWorkspaceConnector: AppConnector = {
   name: 'Google Workspace Suite',
   description: 'Gmail, Calendar, Google Meet, Tasks, Drive, Docs, Sheets, Slides, and Forms',
   category: 'google_workspace',
-  isEnabled: () => googleAuth.isAuthenticated(),
-  getStatus: () => {
-    const isAuth = googleAuth.isAuthenticated();
+  isEnabled: (userEmail?: string) => googleAuth.isAuthenticated(userEmail),
+  getStatus: (userEmail?: string) => {
+    const isAuth = googleAuth.isAuthenticated(userEmail);
     return {
       connected: isAuth,
       details: isAuth ? 'Google Account Connected' : 'Google Account Not Connected',
@@ -137,18 +137,18 @@ export const googleWorkspaceConnector: AppConnector = {
       },
     },
   ],
-  executeTool: async (toolName: string, args: Record<string, any>) => {
+  executeTool: async (toolName: string, args: Record<string, any>, userEmail?: string) => {
     switch (toolName) {
       case 'get_recent_emails': {
-        const emails = await googleWorkspace.getRecentEmails(args.maxResults || 5);
+        const emails = await googleWorkspace.getRecentEmails(args.maxResults || 5, userEmail);
         return { count: emails.length, emails };
       }
       case 'send_email': {
-        const res = await googleWorkspace.sendEmail(args.to, args.subject, args.body);
+        const res = await googleWorkspace.sendEmail(args.to, args.subject, args.body, userEmail);
         return { success: true, message: `Email sent to ${args.to}.`, details: res };
       }
       case 'get_upcoming_calendar_events': {
-        const events = await googleWorkspace.getUpcomingEvents(args.maxResults || 5);
+        const events = await googleWorkspace.getUpcomingEvents(args.maxResults || 5, userEmail);
         return { count: events.length, events };
       }
       case 'create_calendar_event': {
@@ -156,7 +156,9 @@ export const googleWorkspaceConnector: AppConnector = {
           args.summary,
           args.startTimeIso,
           args.endTimeIso,
-          args.description
+          args.description,
+          true,
+          userEmail
         );
         return {
           success: true,
@@ -165,23 +167,23 @@ export const googleWorkspaceConnector: AppConnector = {
         };
       }
       case 'list_google_drive_files': {
-        const files = await googleWorkspace.listDriveFiles(args.query);
+        const files = await googleWorkspace.listDriveFiles(args.query, 10, userEmail);
         return { count: files.length, files };
       }
       case 'create_google_doc': {
-        const doc = await googleWorkspace.createDocument(args.title, args.content);
+        const doc = await googleWorkspace.createDocument(args.title, args.content, userEmail);
         return { success: true, message: `Created Google Doc "${args.title}".`, link: doc.url, doc };
       }
       case 'create_google_sheet': {
-        const sheet = await googleWorkspace.createSpreadsheet(args.title, args.rows);
+        const sheet = await googleWorkspace.createSpreadsheet(args.title, args.rows, userEmail);
         return { success: true, message: `Created Google Sheet "${args.title}".`, link: sheet.url, sheet };
       }
       case 'create_google_presentation': {
-        const slide = await googleWorkspace.createPresentation(args.title, args.subtitle);
+        const slide = await googleWorkspace.createPresentation(args.title, args.subtitle, userEmail);
         return { success: true, message: `Created Google Slides "${args.title}".`, link: slide.url, slide };
       }
       case 'create_google_form': {
-        const form = await googleWorkspace.createForm(args.title, args.description);
+        const form = await googleWorkspace.createForm(args.title, args.description, userEmail);
         return {
           success: true,
           message: `Created Google Form "${args.title}".`,

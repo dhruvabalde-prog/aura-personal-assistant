@@ -33,10 +33,10 @@ export const notesConnector: AppConnector = {
       },
     },
   ],
-  executeTool: async (toolName: string, args: Record<string, any>) => {
+  executeTool: async (toolName: string, args: Record<string, any>, userEmail?: string) => {
     if (toolName === 'save_note') {
       const tags = typeof args.tags === 'string' ? args.tags.split(',').map((t: string) => t.trim()) : [];
-      const note = db.addNote({
+      const note = db.addNote(userEmail || 'guest', {
         title: args.title,
         content: args.content,
         tags,
@@ -45,7 +45,7 @@ export const notesConnector: AppConnector = {
     }
 
     if (toolName === 'list_notes') {
-      const notes = db.getNotes();
+      const notes = db.getNotes(userEmail);
       if (args.searchQuery) {
         const query = args.searchQuery.toLowerCase();
         const filtered = notes.filter(

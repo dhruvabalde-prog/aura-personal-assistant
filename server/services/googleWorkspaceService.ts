@@ -2,30 +2,29 @@ import { google } from 'googleapis';
 import { googleAuth } from './googleAuthService.js';
 
 export class GoogleWorkspaceService {
-  private getAuthClient() {
-    return googleAuth.getClient();
-  }
-
-  private ensureAuth() {
-    if (!googleAuth.isAuthenticated()) {
+  private ensureAuth(userEmail?: string) {
+    if (!googleAuth.isAuthenticated(userEmail)) {
       throw new Error('Google Workspace is not connected. Please authorize your Google account first.');
     }
-    return this.getAuthClient();
+    return googleAuth.getClient(userEmail);
   }
 
   // --- GMAIL ---
-  async getRecentEmails(maxResults: number = 5): Promise<any[]> {
-    const auth = this.ensureAuth();
+  async getRecentEmails(maxResults: number = 6, userEmail?: string): Promise<any[]> {
+    const auth = this.ensureAuth(userEmail);
     const gmail = google.gmail({ version: 'v1', auth });
 
+    // Anti-clutter filter: Primary category, strictly newer than 2 days, skipping automated noreply
     const listRes = await gmail.users.messages.list({
       userId: 'me',
       maxResults,
-      q: 'category:primary',
+      q: 'category:primary newer_than:2d -from:noreply -from:no-reply -from:notifications -from:donotreply',
     });
 
     const messages = listRes.data.messages || [];
     const emailSummaries = [];
+    const now = Date.now();
+    const maxAgeMs = 48 * 60 * 60 * 1000;
 
     for (const msg of messages) {
       if (!msg.id) continue;
@@ -42,6 +41,10 @@ export class GoogleWorkspaceService {
       const date = headers.find((h) => h.name?.toLowerCase() === 'date')?.value || '';
       const snippet = detail.data.snippet || '';
 
+      // Skip old messages beyond 48 hours
+      const msgDateMs = date ? new Date(date).getTime() : now;
+      if (now - msgDateMs > maxAgeMs) continue;
+
       emailSummaries.push({
         id: msg.id,
         from,
@@ -54,8 +57,8 @@ export class GoogleWorkspaceService {
     return emailSummaries;
   }
 
-  async sendEmail(to: string, subject: string, body: string): Promise<{ success: boolean; id?: string }> {
-    const auth = this.ensureAuth();
+  async sendEmail(to: string, subject: string, body: string, userEmail?: string): Promise<{ success: boolean; id?: string }> {
+    const auth = this.ensureAuth(userEmail);
     const gmail = google.gmail({ version: 'v1', auth });
 
     const utf8Subject = `=?utf-8?B?${Buffer.from(subject).toString('base64')}?=`;
@@ -83,8 +86,8 @@ export class GoogleWorkspaceService {
   }
 
   // --- GOOGLE CALENDAR & MEET ---
-  async getUpcomingEvents(maxResults: number = 5): Promise<any[]> {
-    const auth = this.ensureAuth();
+  async getUpcomingEvents(maxResults: number = 5, userEmail?: string): Promise<any[]> {
+    const auth = this.ensureAuth(userEmail);
     const calendar = google.calendar({ version: 'v3', auth });
 
     const res = await calendar.events.list({
@@ -111,9 +114,10 @@ export class GoogleWorkspaceService {
     startTimeIso: string,
     endTimeIso: string,
     description?: string,
-    createMeet: boolean = true
+    createMeet: boolean = true,
+    userEmail?: string
   ): Promise<any> {
-    const auth = this.ensureAuth();
+    const auth = this.ensureAuth(userEmail);
     const calendar = google.calendar({ version: 'v3', auth });
 
     const requestBody: any = {
@@ -148,8 +152,8 @@ export class GoogleWorkspaceService {
   }
 
   // --- GOOGLE TASKS ---
-  async getGoogleTasks(maxResults: number = 10): Promise<any[]> {
-    const auth = this.ensureAuth();
+  async getGoogleTasks(maxResults: number = 10, userEmail?: string): Promise<any[]> {
+    const auth = this.ensureAuth(userEmail);
     const tasks = google.tasks({ version: 'v1', auth });
 
     const res = await tasks.tasks.list({
@@ -167,8 +171,8 @@ export class GoogleWorkspaceService {
     }));
   }
 
-  async createGoogleTask(title: string, notes?: string, due?: string): Promise<any> {
-    const auth = this.ensureAuth();
+  async createGoogleTask(title: string, notes?: string, due?: string, userEmail?: string): Promise<any> {
+    const auth = this.ensureAuth(userEmail);
     const tasks = google.tasks({ version: 'v1', auth });
 
     const res = await tasks.tasks.insert({
@@ -184,8 +188,8 @@ export class GoogleWorkspaceService {
   }
 
   // --- GOOGLE DRIVE ---
-  async listDriveFiles(query?: string, pageSize: number = 10): Promise<any[]> {
-    const auth = this.ensureAuth();
+  async listDriveFiles(query?: string, pageSize: number = 10, userEmail?: string): Promise<any[]> {
+    const auth = this.ensureAuth(userEmail);
     const drive = google.drive({ version: 'v3', auth });
 
     const q = query
@@ -203,8 +207,8 @@ export class GoogleWorkspaceService {
   }
 
   // --- GOOGLE DOCS ---
-  async createDocument(title: string, content: string): Promise<any> {
-    const auth = this.ensureAuth();
+  async createDocument(title: string, content: string, userEmail?: string): Promise<any> {
+    const auth = this.ensureAuth(userEmail);
     const docs = google.docs({ version: 'v1', auth });
 
     // Step 1: Create empty document
@@ -238,8 +242,8 @@ export class GoogleWorkspaceService {
   }
 
   // --- GOOGLE SHEETS ---
-  async createSpreadsheet(title: string, rows: (string | number)[][]): Promise<any> {
-    const auth = this.ensureAuth();
+  async createSpreadsheet(title: string, rows: (string | number)[][], userEmail?: string): Promise<any> {
+    const auth = this.ensureAuth(userEmail);
     const sheets = google.sheets({ version: 'v4', auth });
 
     const createRes = await sheets.spreadsheets.create({
@@ -268,8 +272,8 @@ export class GoogleWorkspaceService {
   }
 
   // --- GOOGLE SLIDES ---
-  async createPresentation(title: string, subtitle?: string): Promise<any> {
-    const auth = this.ensureAuth();
+  async createPresentation(title: string, subtitle?: string, userEmail?: string): Promise<any> {
+    const auth = this.ensureAuth(userEmail);
     const slides = google.slides({ version: 'v1', auth });
 
     const createRes = await slides.presentations.create({
@@ -285,8 +289,8 @@ export class GoogleWorkspaceService {
   }
 
   // --- GOOGLE FORMS ---
-  async createForm(title: string, description?: string): Promise<any> {
-    const auth = this.ensureAuth();
+  async createForm(title: string, description?: string, userEmail?: string): Promise<any> {
+    const auth = this.ensureAuth(userEmail);
     const forms = google.forms({ version: 'v1', auth });
 
     const createRes = await forms.forms.create({
@@ -294,7 +298,7 @@ export class GoogleWorkspaceService {
         info: {
           title,
           documentTitle: title,
-          description: description || 'Created by Aura Chief of Staff',
+          description: description || 'Created by Aura Personal AI',
         },
       },
     });
@@ -306,6 +310,48 @@ export class GoogleWorkspaceService {
       editUrl: `https://docs.google.com/forms/d/${formId}/edit`,
       responderUrl: createRes.data.responderUri || `https://docs.google.com/forms/d/${formId}/viewform`,
     };
+  }
+
+  // --- GOOGLE CONTACTS (PEOPLE API) ---
+  async getContacts(maxResults: number = 250, userEmail?: string): Promise<any[]> {
+    const auth = this.ensureAuth(userEmail);
+    const people = google.people({ version: 'v1', auth });
+
+    try {
+      const res = await people.people.connections.list({
+        resourceName: 'people/me',
+        personFields: 'names,phoneNumbers,emailAddresses,organizations',
+        pageSize: maxResults,
+      });
+
+      const connections = res.data.connections || [];
+      return connections.map((p) => {
+        const name = p.names?.[0]?.displayName || p.names?.[0]?.givenName || 'Unknown Contact';
+        const phoneNumbers = (p.phoneNumbers || [])
+          .map((ph) => ph.value?.replace(/[^0-9]/g, ''))
+          .filter(Boolean) as string[];
+
+        const normalizedPhones = phoneNumbers.map((ph) => {
+          if (ph.length === 10) return `91${ph}`;
+          return ph;
+        });
+
+        const emails = (p.emailAddresses || [])
+          .map((em) => em.value?.toLowerCase().trim())
+          .filter(Boolean) as string[];
+
+        return {
+          resourceName: p.resourceName,
+          name,
+          phoneNumbers: normalizedPhones,
+          emails,
+          organization: p.organizations?.[0]?.name,
+        };
+      });
+    } catch (err: any) {
+      console.warn('[Google Workspace] Contacts fetch note:', err.message);
+      return [];
+    }
   }
 }
 
