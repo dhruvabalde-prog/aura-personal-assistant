@@ -60,13 +60,7 @@ function getUserEmail(req: Request): string {
   return 'guest';
 }
 
-app.use((req: Request, res: Response, next) => {
-  const email = getUserEmail(req);
-  if (email && email !== 'guest') {
-    whatsappService.transferGuestSessionToUser(email);
-  }
-  next();
-});
+
 
 // Health check
 app.get('/api/health', (req: Request, res: Response) => {

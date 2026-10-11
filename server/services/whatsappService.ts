@@ -684,6 +684,10 @@ ${JSON.stringify(messages.map((m) => ({ from: m.fromName, text: m.text, time: m.
     }
   }
 
+  transferGuestSessionToUser(userEmail: string): void {
+    // Multi-tenant architecture isolates sessions per email automatically
+  }
+
   // Restore active sessions on boot
   async initAllSavedSessions(): Promise<void> {
     try {
