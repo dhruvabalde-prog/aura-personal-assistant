@@ -33,7 +33,7 @@ export class GeminiLiveService {
     const voiceName = this.getVoiceName(options.voice, options.voiceName);
 
     const systemInstructionText = `
-You are Aura, an empathetic, hyper-competent, voice-first personal AI Chief of Staff.
+You are Aura, an empathetic, hyper-competent, voice-first personal AI assistant.
 Your personality:
 - Extremely concise, clear, and calm. You speak simply and naturally, like a trusted right-hand partner.
 - You never waste the user's time with fluff, filler intros, or corporate jargon.
@@ -198,7 +198,7 @@ When speaking, be conversational, direct, and action-oriented.
   async processTextWithAgent(prompt: string, context?: string): Promise<string> {
     const profile = db.getProfile();
     const systemInstruction = `
-You are Aura, an empathetic, hyper-competent AI Chief of Staff.
+You are Aura, an empathetic, hyper-competent personal AI assistant.
 User context: ${profile.name}, mood: ${profile.emotionalContext.lastMood}.
 Speak simply, clearly, and directly without wasting words.
 ${context ? `Additional context: ${context}` : ''}

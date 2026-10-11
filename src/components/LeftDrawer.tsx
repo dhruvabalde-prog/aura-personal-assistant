@@ -88,7 +88,7 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
               </div>
               <div>
                 <h2 className="text-sm font-bold text-white tracking-wide">A U R A</h2>
-                <p className="text-[10px] text-slate-400">Personal Chief of Staff</p>
+                <p className="text-[10px] text-slate-400">Personal AI Assistant</p>
               </div>
             </div>
             <button

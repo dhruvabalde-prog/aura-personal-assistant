@@ -1,7 +1,6 @@
-import React from 'react';
-import { Mic, MicOff, Sparkles, Shield, MessageCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { User, Music, Camera, FolderKanban, MessageSquare, Mic, MicOff, ExternalLink, FileSpreadsheet, FileText, CheckCircle2 } from 'lucide-react';
 import { VoiceSphere, AssistantState } from '../components/VoiceSphere';
-import { VoiceSelector } from '../components/VoiceSelector';
 
 interface VoiceViewProps {
   assistantState: AssistantState;
@@ -10,12 +9,13 @@ interface VoiceViewProps {
   onToggleRecording: () => void;
   voiceGender: 'female' | 'male';
   onVoiceGenderChange: (voice: 'female' | 'male') => void;
-  transcript: { user?: string; assistant?: string };
   googleConnected: boolean;
   onOpenGoogleModal: () => void;
   whatsappConnected: boolean;
   onOpenWhatsAppModal: () => void;
-  onSendQuickPrompt: (prompt: string) => void;
+  onOpenChatTab: () => void;
+  onOpenAccountModal: () => void;
+  artifacts?: Array<{ id: string; title: string; type: 'sheet' | 'doc' | 'task'; url?: string }>;
 }
 
 export const VoiceView: React.FC<VoiceViewProps> = ({
@@ -25,136 +25,203 @@ export const VoiceView: React.FC<VoiceViewProps> = ({
   onToggleRecording,
   voiceGender,
   onVoiceGenderChange,
-  transcript,
   googleConnected,
   onOpenGoogleModal,
   whatsappConnected,
   onOpenWhatsAppModal,
-  onSendQuickPrompt,
+  onOpenChatTab,
+  onOpenAccountModal,
+  artifacts = [],
 }) => {
-  const quickPrompts = [
-    "What did I miss on WhatsApp?",
-    "Check my priority tasks",
-    "What's on my schedule today?",
-    "Take a quick note for me",
-  ];
+  const [isArtifactsMenuOpen, setIsArtifactsMenuOpen] = useState(false);
+  const [isMusicActive, setIsMusicActive] = useState(false);
+  const [cameraFeedback, setCameraFeedback] = useState<string | null>(null);
+
+  const handleCameraSnap = () => {
+    setCameraFeedback('Vision ready. Snap document or receipt in chat.');
+    setTimeout(() => setCameraFeedback(null), 3000);
+  };
+
+  const handleToggleMusic = () => {
+    setIsMusicActive(!isMusicActive);
+  };
 
   return (
-    <div className="flex flex-col items-center justify-between min-h-[calc(100vh-5rem)] p-4 max-w-md mx-auto select-none">
-      {/* Top Header: Voice Selection & Status */}
-      <header className="w-full flex items-center justify-between pt-2">
-        <VoiceSelector
-          currentVoice={voiceGender}
-          onChange={onVoiceGenderChange}
-          disabled={isRecording}
-        />
+    <div className="relative flex flex-col items-center justify-between h-[calc(100vh-7.5rem)] p-4 max-w-md mx-auto select-none overflow-hidden">
+      {/* Top Subtle Status Dots (Zero Text Clutter) */}
+      <header className="w-full flex items-center justify-between pt-1 px-2 shrink-0">
+        <button
+          onClick={onOpenAccountModal}
+          className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900/80 border border-slate-800 text-[11px] font-medium text-slate-300 hover:border-slate-700 transition-colors cursor-pointer"
+        >
+          <span className={`w-2 h-2 rounded-full ${googleConnected ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+          <span>Google</span>
+        </button>
 
-        <div className="flex items-center gap-1.5">
-          {/* WhatsApp status indicator */}
-          <button
-            onClick={onOpenWhatsAppModal}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border transition-colors cursor-pointer ${
-              whatsappConnected
-                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-                : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
-            }`}
-          >
-            <MessageCircle className="w-3 h-3" />
-            <span>WhatsApp</span>
-          </button>
-
-          {/* Google Workspace status indicator */}
-          <button
-            onClick={onOpenGoogleModal}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border transition-colors cursor-pointer ${
-              googleConnected
-                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-                : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
-            }`}
-          >
-            <Shield className="w-3 h-3" />
-            <span>Google</span>
-          </button>
-        </div>
+        <button
+          onClick={onOpenWhatsAppModal}
+          className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900/80 border border-slate-800 text-[11px] font-medium text-slate-300 hover:border-slate-700 transition-colors cursor-pointer"
+        >
+          <span className={`w-2 h-2 rounded-full ${whatsappConnected ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+          <span>WhatsApp</span>
+        </button>
       </header>
 
-      {/* Center Hero: Reactive Glowing Voice Sphere */}
-      <div className="flex flex-col items-center justify-center my-auto w-full">
-        <VoiceSphere
-          state={assistantState}
-          volume={volume}
-          onClick={onToggleRecording}
-        />
+      {/* Center Interactive Circular Visual Sphere (Axel Style - Pure Visual, Zero Transcripts) */}
+      <div className="flex-1 flex flex-col items-center justify-center my-auto w-full">
+        <div className="relative flex items-center justify-center">
+          <VoiceSphere
+            state={assistantState}
+            volume={volume}
+            onClick={onToggleRecording}
+          />
+        </div>
 
-        {/* Minimal State Label */}
-        <div className="mt-4 text-center">
-          <p className="text-sm font-medium tracking-wide text-slate-300">
-            {assistantState === 'listening' && 'Listening to you...'}
-            {assistantState === 'thinking' && 'Processing your request...'}
-            {assistantState === 'speaking' && 'Speaking... (tap to interrupt)'}
-            {assistantState === 'idle' && (isRecording ? 'Listening for your voice...' : 'Tap to start speaking')}
+        {/* Minimal Subtle State Hint */}
+        <div className="mt-8 text-center space-y-1">
+          <p className="text-sm font-semibold tracking-wide text-slate-200">
+            {assistantState === 'listening' && 'Listening...'}
+            {assistantState === 'thinking' && 'Processing...'}
+            {assistantState === 'speaking' && 'Speaking (tap to interrupt)'}
+            {assistantState === 'idle' && (isRecording ? 'Listening for your voice...' : 'Tap to converse')}
           </p>
-          <p className="text-[11px] text-slate-400 mt-0.5">
-            {isRecording ? 'Raw spoken thoughts welcome' : 'Minimal, zero-clutter Chief of Staff'}
+          <p className="text-[11px] text-slate-400 font-mono">
+            {isRecording ? 'Real-time Gemini Live WebSocket' : 'Aura Personal Assistant'}
           </p>
         </div>
 
-        {/* Live Dynamic Transcription (clean minimal cards) */}
-        {(transcript.user || transcript.assistant) && (
-          <div className="w-full mt-6 space-y-2.5 max-h-48 overflow-y-auto px-1 animate-fade-in">
-            {transcript.user && (
-              <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 text-xs text-slate-200">
-                <span className="text-[10px] uppercase font-semibold text-indigo-400 block mb-0.5">You</span>
-                <p className="leading-relaxed">{transcript.user}</p>
-              </div>
-            )}
-            {transcript.assistant && (
-              <div className="p-3 rounded-2xl bg-indigo-950/40 border border-indigo-900/50 text-xs text-indigo-100">
-                <span className="text-[10px] uppercase font-semibold text-emerald-400 block mb-0.5">Aura</span>
-                <p className="leading-relaxed">{transcript.assistant}</p>
-              </div>
-            )}
+        {/* Temporary Camera / Audio Feedback Toast */}
+        {cameraFeedback && (
+          <div className="mt-3 px-3 py-1.5 rounded-full bg-indigo-600/90 text-white text-[11px] font-medium animate-fade-in shadow-lg">
+            {cameraFeedback}
           </div>
         )}
       </div>
 
-      {/* Bottom Quick Suggestion Chips & Voice Control */}
-      <div className="w-full flex flex-col items-center gap-4 pb-4">
-        {/* Quick prompt chips */}
-        <div className="flex flex-wrap justify-center gap-1.5 w-full">
-          {quickPrompts.map((p, idx) => (
-            <button
-              key={idx}
-              onClick={() => onSendQuickPrompt(p)}
-              className="text-[11px] text-slate-400 bg-slate-900/70 hover:bg-slate-800/90 hover:text-slate-200 border border-slate-800/80 px-2.5 py-1 rounded-full transition-colors cursor-pointer"
-            >
-              {p}
-            </button>
-          ))}
-        </div>
+      {/* Axel Style: The 5 Dedicated Bottom Controls */}
+      <div className="w-full pt-2 pb-1 shrink-0">
+        <div className="flex items-center justify-between px-3 py-2 rounded-3xl bg-slate-900/90 border border-slate-800/90 backdrop-blur-xl shadow-2xl">
+          {/* 1. Account Button */}
+          <button
+            onClick={onOpenAccountModal}
+            title="Account & Connections"
+            className="flex flex-col items-center gap-1 p-2 rounded-2xl text-slate-400 hover:text-white hover:bg-slate-800/60 transition-all cursor-pointer"
+          >
+            <User className="w-5 h-5" />
+            <span className="text-[9px] font-medium">Account</span>
+          </button>
 
-        {/* Big Tap-To-Talk Button */}
-        <button
-          onClick={onToggleRecording}
-          className={`flex items-center justify-center gap-2 w-full py-3.5 px-6 rounded-2xl font-semibold text-sm transition-all duration-300 shadow-xl cursor-pointer ${
-            isRecording
-              ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/30'
-              : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/30'
-          }`}
-        >
-          {isRecording ? (
-            <>
-              <MicOff className="w-4 h-4 animate-pulse" />
-              <span>Tap to Finish Speaking</span>
-            </>
-          ) : (
-            <>
-              <Mic className="w-4 h-4" />
-              <span>Tap to Speak</span>
-            </>
-          )}
-        </button>
+          {/* 2. Music Button */}
+          <button
+            onClick={handleToggleMusic}
+            title="Focus Audio / Music"
+            className={`flex flex-col items-center gap-1 p-2 rounded-2xl transition-all cursor-pointer ${
+              isMusicActive
+                ? 'text-indigo-400 bg-indigo-500/10 shadow-inner'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Music className="w-5 h-5" />
+            <span className="text-[9px] font-medium">Music</span>
+          </button>
+
+          {/* Center Mic Action: Big Prominent Toggle */}
+          <button
+            onClick={onToggleRecording}
+            title={isRecording ? 'Finish Speaking' : 'Start Speaking'}
+            className={`w-12 h-12 -mt-4 rounded-2xl flex items-center justify-center transition-all duration-300 shadow-xl cursor-pointer ${
+              isRecording
+                ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/40 animate-pulse'
+                : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/40 hover:scale-105'
+            }`}
+          >
+            {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+          </button>
+
+          {/* 3. Camera / Vision Button */}
+          <button
+            onClick={handleCameraSnap}
+            title="Camera & Vision"
+            className="flex flex-col items-center gap-1 p-2 rounded-2xl text-slate-400 hover:text-white hover:bg-slate-800/60 transition-all cursor-pointer"
+          >
+            <Camera className="w-5 h-5" />
+            <span className="text-[9px] font-medium">Camera</span>
+          </button>
+
+          {/* 4. Artifacts Menu Button */}
+          <button
+            onClick={() => setIsArtifactsMenuOpen(!isArtifactsMenuOpen)}
+            title="User Artifacts & Sheets"
+            className={`flex flex-col items-center gap-1 p-2 rounded-2xl transition-all cursor-pointer ${
+              isArtifactsMenuOpen
+                ? 'text-emerald-400 bg-emerald-500/10'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <FolderKanban className="w-5 h-5" />
+            <span className="text-[9px] font-medium">Artifacts</span>
+          </button>
+
+          {/* 5. Chat Switcher Button */}
+          <button
+            onClick={onOpenChatTab}
+            title="Open Chat Tab"
+            className="flex flex-col items-center gap-1 p-2 rounded-2xl text-slate-400 hover:text-white hover:bg-slate-800/60 transition-all cursor-pointer"
+          >
+            <MessageSquare className="w-5 h-5" />
+            <span className="text-[9px] font-medium">Chat</span>
+          </button>
+        </div>
       </div>
+
+      {/* Artifacts Slide-Up Dropdown Drawer */}
+      {isArtifactsMenuOpen && (
+        <div className="absolute inset-x-4 bottom-20 z-40 bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-2xl animate-fade-in space-y-3">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+            <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+              <FolderKanban className="w-4 h-4 text-emerald-400" />
+              <span>Your Generated Artifacts</span>
+            </h4>
+            <button
+              onClick={() => setIsArtifactsMenuOpen(false)}
+              className="text-slate-400 hover:text-white text-xs cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="max-h-56 overflow-y-auto space-y-2 no-scrollbar">
+            {artifacts.length === 0 ? (
+              <div className="text-center py-6 text-xs text-slate-400 space-y-1">
+                <p>No Google Docs or Sheets created yet.</p>
+                <p className="text-[10px] text-slate-400">Ask Aura in Voice or Chat to generate a spreadsheet or project goal.</p>
+              </div>
+            ) : (
+              artifacts.map((art) => (
+                <a
+                  key={art.id}
+                  href={art.url || '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center justify-between p-2.5 rounded-2xl bg-slate-950/80 hover:bg-slate-800/90 border border-slate-800/80 text-xs text-slate-200 transition-colors"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {art.type === 'sheet' ? (
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-400 shrink-0" />
+                    ) : art.type === 'doc' ? (
+                      <FileText className="w-4 h-4 text-blue-400 shrink-0" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4 text-indigo-400 shrink-0" />
+                    )}
+                    <span className="font-semibold truncate">{art.title}</span>
+                  </div>
+                  <ExternalLink className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-2" />
+                </a>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

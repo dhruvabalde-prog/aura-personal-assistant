@@ -39,16 +39,15 @@ export class WhatsAppService {
   private userPhone: string | null = null;
   private userName: string | null = null;
   private isInitializing: boolean = false;
-  private activeAuthDir: string = path.resolve(process.cwd(), 'storage', 'baileys_auth', 'guest');
+  private activeAuthDir: string = path.resolve(process.cwd(), 'storage', 'baileys_auth', 'session');
   private currentActiveUserEmail: string = 'guest';
 
   constructor() {
     // Session initializes on demand
   }
 
-  private getAuthDir(userEmail?: string): string {
-    const norm = db.normalizeEmail(userEmail);
-    return path.resolve(process.cwd(), 'storage', 'baileys_auth', encodeURIComponent(norm));
+  private getAuthDir(_userEmail?: string): string {
+    return path.resolve(process.cwd(), 'storage', 'baileys_auth', 'session');
   }
 
   getStatus(userEmail?: string): WhatsAppStatus {
@@ -80,6 +79,7 @@ export class WhatsAppService {
       if (!Array.isArray(messages) || messages.length === 0) return;
 
       let importedCount = 0;
+      const batch: WhatsAppMessage[] = [];
 
       for (const msg of messages) {
         try {
@@ -110,7 +110,7 @@ export class WhatsAppService {
             userPhone: this.userPhone || undefined,
           };
 
-          db.addWhatsAppMessage(this.currentActiveUserEmail, storedMsg);
+          batch.push(storedMsg);
           importedCount++;
 
           // Anti-clutter: ONLY extract tasks from messages in the last 24 hours
@@ -121,6 +121,10 @@ export class WhatsAppService {
         } catch (historyErr) {
           // ignore individual message parse errors
         }
+      }
+
+      if (batch.length > 0) {
+        db.addWhatsAppMessagesBatch(this.currentActiveUserEmail, batch);
       }
 
       console.log(`[WhatsApp] Successfully synced and stored ${importedCount} existing messages for user ${this.currentActiveUserEmail} (${this.userPhone})`);
@@ -676,10 +680,34 @@ ${JSON.stringify(messages.map((m) => ({ from: m.fromName, text: m.text, time: m.
     this.currentActiveUserEmail = 'guest';
   }
 
+  public transferGuestSessionToUser(userEmail: string) {
+    const norm = db.normalizeEmail(userEmail);
+    if (norm === 'guest') return;
+
+    if (this.currentActiveUserEmail === 'guest' && this.status === 'connected') {
+      console.log(`[WhatsApp] Migrating active WhatsApp session from guest to authenticated user: ${norm}`);
+      this.currentActiveUserEmail = norm;
+      if (this.userPhone) {
+        db.saveWhatsAppPhone(norm, this.userPhone);
+        db.toggleConnector(norm, 'whatsapp', true);
+      }
+      const guestMsgs = db.getWhatsAppMessages('guest');
+      const userMsgs = db.getWhatsAppMessages(norm);
+      if (userMsgs.length === 0 && guestMsgs.length > 0) {
+        db.addWhatsAppMessagesBatch(norm, guestMsgs);
+      }
+    }
+  }
+
   private clearAuth() {
     if (fs.existsSync(this.activeAuthDir)) {
       try {
-        fs.rmSync(this.activeAuthDir, { recursive: true, force: true });
+        const files = fs.readdirSync(this.activeAuthDir);
+        for (const file of files) {
+          try {
+            fs.rmSync(path.join(this.activeAuthDir, file), { recursive: true, force: true });
+          } catch (e) {}
+        }
       } catch (e) {
         console.error('[WhatsApp] Error clearing auth directory:', e);
       }

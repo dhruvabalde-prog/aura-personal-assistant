@@ -99,7 +99,7 @@ export const CommsView: React.FC<CommsViewProps> = ({
 
               <div className="flex items-center gap-2 text-[11px] text-slate-400 pt-1 border-t border-slate-800/60">
                 <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Strict boundary: 1-to-1 Chief of Staff only. Groups are read-only.</span>
+                <span>Strict boundary: 1-to-1 assistant only. Groups are read-only.</span>
               </div>
             </div>
 

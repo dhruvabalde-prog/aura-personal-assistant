@@ -4,7 +4,7 @@ import { AuraView } from './views/AuraView';
 import { ActionsView } from './views/ActionsView';
 import { MyDayView, RoutineItem } from './views/MyDayView';
 import { CommsView } from './views/CommsView';
-import { DashboardsView } from './views/DashboardsView';
+import { GoalsView, GoalItem } from './views/GoalsView';
 import { LeftDrawer, ChatSessionMeta } from './components/LeftDrawer';
 import { GoogleConnectModal } from './components/GoogleConnectModal';
 import { WhatsAppConnectModal, WhatsAppStatusData } from './components/WhatsAppConnectModal';
@@ -36,7 +36,7 @@ export const App: React.FC = () => {
 
   // Chat sessions & history
   const [sessions, setSessions] = useState<ChatSessionMeta[]>([
-    { id: 'sess-1', title: 'Main Chief of Staff', updatedAt: new Date().toISOString() },
+    { id: 'sess-1', title: 'Aura Assistant', updatedAt: new Date().toISOString() },
   ]);
   const [activeSessionId, setActiveSessionId] = useState('sess-1');
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
@@ -45,6 +45,7 @@ export const App: React.FC = () => {
   // Tasks & Clerical Data
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [notes, setNotes] = useState<NoteItem[]>([]);
+  const [goals, setGoals] = useState<GoalItem[]>([]);
   const [profile, setProfile] = useState<UserProfileData | null>(null);
 
   // Notifications
@@ -96,10 +97,11 @@ export const App: React.FC = () => {
   // Initial & Recurring Data Fetch
   const fetchData = async () => {
     try {
-      const [chatsRes, tasksRes, notesRes, profileRes, oauthRes, waRes, notifRes, adminRes] = await Promise.all([
+      const [chatsRes, tasksRes, notesRes, goalsRes, profileRes, oauthRes, waRes, notifRes, adminRes] = await Promise.all([
         authFetch('/api/chats').then((r) => r.json()),
         authFetch('/api/tasks').then((r) => r.json()),
         authFetch('/api/notes').then((r) => r.json()),
+        authFetch('/api/goals').then((r) => r.json()).catch(() => []),
         authFetch('/api/user/profile').then((r) => r.json()),
         authFetch('/api/auth/google/details').then((r) => r.json()),
         authFetch('/api/whatsapp/status').then((r) => r.json()),
@@ -110,6 +112,7 @@ export const App: React.FC = () => {
       setMessages(chatsRes);
       setTasks(tasksRes);
       setNotes(notesRes);
+      if (Array.isArray(goalsRes)) setGoals(goalsRes);
       setProfile(profileRes);
       setOauthDetails(oauthRes);
       setWhatsappStatus(waRes);
@@ -443,6 +446,45 @@ export const App: React.FC = () => {
     setWhatsappStatus(status);
   };
 
+  const handleAddGoal = async (outcome: string, targetDate: string, frequency: 'weekly' | 'biweekly' | 'monthly') => {
+    const res = await authFetch('/api/goals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ outcome, targetDate, milestoneFrequency: frequency }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to create goal');
+    }
+    const newGoal = await res.json();
+    setGoals((prev) => [newGoal, ...prev]);
+    // Refresh tasks to pick up the newly scheduled Daily North Star
+    authFetch('/api/tasks').then((r) => r.json()).then(setTasks).catch(() => {});
+  };
+
+  const handleToggleMilestone = async (goalId: string, milestoneId: string) => {
+    const goal = goals.find((g) => g.id === goalId);
+    if (!goal) return;
+    const updatedMilestones = goal.milestones.map((m) =>
+      m.id === milestoneId ? { ...m, completed: !m.completed } : m
+    );
+    setGoals((prev) =>
+      prev.map((g) => (g.id === goalId ? { ...g, milestones: updatedMilestones } : g))
+    );
+    await authFetch(`/api/goals/${goalId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ milestones: updatedMilestones }),
+    });
+  };
+
+  const handleDeleteGoal = async (goalId: string) => {
+    if (confirm('Delete this goal and project sheet link?')) {
+      setGoals((prev) => prev.filter((g) => g.id !== goalId));
+      await authFetch(`/api/goals/${goalId}`, { method: 'DELETE' });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#08090d] text-slate-100 flex flex-col justify-between max-w-md mx-auto relative shadow-2xl overflow-hidden pb-16">
       {/* 1. Slim Top Bar with Left Drawer Menu & PWA Install */}
@@ -504,8 +546,17 @@ export const App: React.FC = () => {
             onToggleRecording={handleToggleRecording}
             voiceGender={voiceGender}
             onVoiceGenderChange={handleVoiceGenderChange}
-            transcript={transcript}
-            onSendQuickPrompt={handleSendMessage}
+            googleConnected={!!oauthDetails?.connected}
+            onOpenGoogleModal={() => setIsGoogleModalOpen(true)}
+            whatsappConnected={whatsappStatus?.status === 'connected'}
+            onOpenWhatsAppModal={() => setIsWhatsAppModalOpen(true)}
+            onOpenAccountModal={() => setIsGoogleModalOpen(true)}
+            artifacts={goals.map((g) => ({
+              id: g.id,
+              title: g.outcome,
+              type: 'sheet' as const,
+              url: g.googleSheetUrl,
+            }))}
             messages={messages}
             onSendMessage={handleSendMessage}
             onClearChat={handleClearChat}
@@ -552,11 +603,13 @@ export const App: React.FC = () => {
           />
         )}
 
-        {activeTab === 'dashboards' && (
-          <DashboardsView
-            tasksCount={tasks.filter((t) => !t.completed).length}
-            completedTasksCount={tasks.filter((t) => t.completed).length}
-            whatsappMessageCount={whatsappStatus?.messageCount || 0}
+        {activeTab === 'goals' && (
+          <GoalsView
+            goals={goals}
+            onAddGoal={handleAddGoal}
+            onToggleMilestone={handleToggleMilestone}
+            onDeleteGoal={handleDeleteGoal}
+            isLoading={isChatLoading}
           />
         )}
       </main>

@@ -51,6 +51,14 @@ function getUserEmail(req: Request): string {
   return 'guest';
 }
 
+app.use((req: Request, res: Response, next) => {
+  const email = getUserEmail(req);
+  if (email && email !== 'guest') {
+    whatsappService.transferGuestSessionToUser(email);
+  }
+  next();
+});
+
 // Health check
 app.get('/api/health', (req: Request, res: Response) => {
   const email = getUserEmail(req);
@@ -117,6 +125,41 @@ app.delete('/api/tasks', (req: Request, res: Response) => {
   const email = getUserEmail(req);
   db.clearTasks(email);
   res.json({ success: true, message: 'Tasks cleared' });
+});
+
+// Goals (Reverse-Engineered Projects & Google Sheets)
+import { goalPlanner } from './services/goalPlannerService.js';
+
+app.get('/api/goals', (req: Request, res: Response) => {
+  const email = getUserEmail(req);
+  res.json(db.getGoals(email));
+});
+
+app.post('/api/goals', async (req: Request, res: Response) => {
+  const email = getUserEmail(req);
+  const { outcome, targetDate, milestoneFrequency } = req.body;
+  if (!outcome || !targetDate) {
+    res.status(400).json({ error: 'outcome and targetDate are required' });
+    return;
+  }
+  try {
+    const goal = await goalPlanner.planAndCreateGoal(outcome, targetDate, milestoneFrequency, email);
+    res.json(goal);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to create goal' });
+  }
+});
+
+app.patch('/api/goals/:id', (req: Request, res: Response) => {
+  const email = getUserEmail(req);
+  db.updateGoal(email, req.params.id as string, req.body);
+  res.json({ success: true });
+});
+
+app.delete('/api/goals/:id', (req: Request, res: Response) => {
+  const email = getUserEmail(req);
+  db.deleteGoal(email, req.params.id as string);
+  res.json({ success: true });
 });
 
 // Notes

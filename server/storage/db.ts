@@ -110,6 +110,28 @@ export interface ContactPerson {
   organization?: string;
 }
 
+export interface GoalMilestone {
+  id: string;
+  title: string;
+  targetDate: string;
+  completed: boolean;
+  northStarTask: string;
+}
+
+export interface GoalItem {
+  id: string;
+  outcome: string;
+  targetDate: string;
+  createdAt: string;
+  status: 'planning' | 'active' | 'completed' | 'paused';
+  milestoneFrequency: 'weekly' | 'biweekly' | 'monthly';
+  googleSheetUrl?: string;
+  googleSheetId?: string;
+  milestones: GoalMilestone[];
+  dailyNorthStar: string;
+  googleTaskId?: string;
+}
+
 export interface UserWorkspace {
   email: string;
   profile: UserProfile;
@@ -117,6 +139,7 @@ export interface UserWorkspace {
   googleTokens: GoogleTokens | null;
   tasks: ExtractedTask[];
   notes: NoteItem[];
+  goals?: GoalItem[];
   whatsappMessages: WhatsAppMessage[];
   notifications: NotificationItem[];
   savedWhatsAppPhone?: string;
@@ -265,22 +288,39 @@ class Database {
         users: {},
         adminSettings: defaultAdminSettings,
       };
-      this.save();
+      this.flushSave();
     }
   }
 
-  private save(emailToSync?: string) {
+  private saveTimeout: NodeJS.Timeout | null = null;
+  private pendingSyncEmails: Set<string> = new Set();
+
+  public save(emailToSync?: string) {
+    if (emailToSync) {
+      this.pendingSyncEmails.add(emailToSync);
+    }
+
+    if (this.saveTimeout) {
+      return;
+    }
+
+    this.saveTimeout = setTimeout(() => {
+      this.saveTimeout = null;
+      this.flushSave();
+    }, 150);
+  }
+
+  public flushSave() {
     try {
-      const tempPath = `${DB_FILE}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify(this.data, null, 2), 'utf-8');
-      fs.renameSync(tempPath, DB_FILE);
+      fs.writeFileSync(DB_FILE, JSON.stringify(this.data, null, 2), 'utf-8');
     } catch (err) {
       console.error('[DB] Error persisting database:', err);
     }
 
-    // Asynchronously sync user workspace to Supabase cloud
-    if (emailToSync) {
-      const norm = this.normalizeEmail(emailToSync);
+    const emails = Array.from(this.pendingSyncEmails);
+    this.pendingSyncEmails.clear();
+    for (const email of emails) {
+      const norm = this.normalizeEmail(email);
       if (norm !== 'guest' && norm !== 'default' && this.data.users[norm]) {
         supabaseService.syncWorkspace(norm, this.data.users[norm]).catch((err) => {
           console.warn('[DB] Supabase async sync warning:', err?.message || err);
@@ -568,6 +608,69 @@ class Database {
     this.save(email);
   }
 
+  // --- Goals Methods ---
+  getGoals(email?: string): GoalItem[] {
+    const ws = this.getUserWorkspace(email);
+    return ws.goals || [];
+  }
+
+  addGoal(arg1: string | Omit<GoalItem, 'id' | 'createdAt'>, arg2?: Omit<GoalItem, 'id' | 'createdAt'>): GoalItem {
+    let email: string | undefined;
+    let goal: Omit<GoalItem, 'id' | 'createdAt'>;
+    if (typeof arg1 === 'string') {
+      email = arg1;
+      goal = arg2!;
+    } else {
+      goal = arg1;
+    }
+    const ws = this.getUserWorkspace(email);
+    if (!ws.goals) ws.goals = [];
+    const newGoal: GoalItem = {
+      id: `goal-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      createdAt: new Date().toISOString(),
+      ...goal,
+    };
+    ws.goals.unshift(newGoal);
+    this.save(email);
+    return newGoal;
+  }
+
+  updateGoal(arg1: string, arg2: string | Partial<GoalItem>, arg3?: Partial<GoalItem>) {
+    let email: string | undefined;
+    let goalId: string;
+    let updates: Partial<GoalItem>;
+    if (arg3 !== undefined) {
+      email = arg1;
+      goalId = arg2 as string;
+      updates = arg3;
+    } else {
+      goalId = arg1;
+      updates = arg2 as Partial<GoalItem>;
+    }
+    const ws = this.getUserWorkspace(email);
+    if (!ws.goals) ws.goals = [];
+    const idx = ws.goals.findIndex((g) => g.id === goalId);
+    if (idx !== -1) {
+      ws.goals[idx] = { ...ws.goals[idx], ...updates };
+      this.save(email);
+    }
+  }
+
+  deleteGoal(arg1: string, arg2?: string) {
+    let email: string | undefined;
+    let goalId: string;
+    if (arg2 !== undefined) {
+      email = arg1;
+      goalId = arg2;
+    } else {
+      goalId = arg1;
+    }
+    const ws = this.getUserWorkspace(email);
+    if (!ws.goals) return;
+    ws.goals = ws.goals.filter((g) => g.id !== goalId);
+    this.save(email);
+  }
+
   // --- Notes Methods ---
   getNotes(email?: string): NoteItem[] {
     return this.getUserWorkspace(email).notes;
@@ -618,6 +721,17 @@ class Database {
     ws.whatsappMessages.unshift(msg);
     if (ws.whatsappMessages.length > 200) {
       ws.whatsappMessages = ws.whatsappMessages.slice(0, 200);
+    }
+    this.save(email);
+  }
+
+  addWhatsAppMessagesBatch(email: string, messages: WhatsAppMessage[]) {
+    if (!messages || messages.length === 0) return;
+    const ws = this.getUserWorkspace(email);
+    if (!ws.whatsappMessages) ws.whatsappMessages = [];
+    ws.whatsappMessages.unshift(...messages);
+    if (ws.whatsappMessages.length > 250) {
+      ws.whatsappMessages = ws.whatsappMessages.slice(0, 250);
     }
     this.save(email);
   }
